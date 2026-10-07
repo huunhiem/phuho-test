@@ -1,0 +1,147 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        getUserData().role == 'ADMIN' ||
+        request.auth.token.email == 'tccb.nhiem@gmail.com'
+      );
+    }
+
+    function isPrincipal() {
+      return isSignedIn() && (getUserData().role == 'PRINCIPAL' || isAdmin());
+    }
+
+    function isDepartmentHead() {
+      return isSignedIn() && (getUserData().role == 'DEPARTMENT_HEAD' || isPrincipal());
+    }
+
+    function isTeacher() {
+      return isSignedIn() && (getUserData().role == 'TEACHER' || isDepartmentHead());
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // Users collection
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // School and institutional metadata
+    match /schools/{schoolId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /academicYears/{yearId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /grades/{gradeId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /classes/{classId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin() || isDepartmentHead();
+    }
+
+    match /students/{studentId} {
+      allow read: if isTeacher() || isOwner(studentId);
+      allow write: if isAdmin() || isTeacher();
+    }
+
+    match /teachers/{teacherId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /subjects/{subjectId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin() || isDepartmentHead();
+    }
+
+    match /lessons/{lessonId} {
+      allow read: if isSignedIn();
+      allow write: if isTeacher();
+    }
+
+    match /materials/{materialId} {
+      allow read: if isSignedIn();
+      allow write: if isTeacher();
+    }
+
+    // Question Bank: Strictly hidden from students
+    match /questions/{questionId} {
+      allow read, write: if isTeacher();
+    }
+
+    match /questionBanks/{bankId} {
+      allow read, write: if isTeacher();
+    }
+
+    // Tests: Creation & Management restricted to Teachers
+    match /tests/{testId} {
+      allow read, write: if isTeacher();
+    }
+
+    match /testQuestions/{testQuestionId} {
+      allow read, write: if isTeacher();
+    }
+
+    // Assignments: Students can read if active; Teachers manage
+    match /assignments/{assignmentId} {
+      allow read: if isSignedIn();
+      allow write: if isTeacher();
+    }
+
+    // Submissions: Students can create and read their own; Teachers can read/grade all
+    match /submissions/{submissionId} {
+      allow read: if isTeacher() || (isSignedIn() && resource.data.studentId == request.auth.uid);
+      allow create: if isSignedIn() && request.resource.data.studentId == request.auth.uid;
+      allow update: if isTeacher() || (isSignedIn() && resource.data.studentId == request.auth.uid && resource.data.status == 'IN_PROGRESS');
+      allow delete: if isAdmin();
+    }
+
+    match /answers/{answerId} {
+      allow read: if isTeacher() || (isSignedIn() && resource.data.studentId == request.auth.uid);
+      allow create, update: if isSignedIn() && request.resource.data.studentId == request.auth.uid;
+      allow delete: if isAdmin();
+    }
+
+    match /learningProgress/{progressId} {
+      allow read: if isTeacher() || (isSignedIn() && resource.data.studentId == request.auth.uid);
+      allow write: if isTeacher() || isAdmin();
+    }
+
+    match /reports/{reportId} {
+      allow read: if isTeacher() || isPrincipal() || isAdmin();
+      allow write: if isDepartmentHead() || isAdmin();
+    }
+
+    match /systemSettings/{settingId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+  }
+}

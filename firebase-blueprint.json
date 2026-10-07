@@ -1,0 +1,198 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile with role access control for Phu Ho IT LMS",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "username": { "type": "string" },
+        "fullName": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "role": { "type": "string", "enum": ["ADMIN", "PRINCIPAL", "DEPARTMENT_HEAD", "TEACHER", "STUDENT"] },
+        "schoolId": { "type": "string" },
+        "classId": { "type": "string" },
+        "gradeId": { "type": "string" },
+        "teacherCode": { "type": "string" },
+        "studentCode": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "fullName", "email", "role", "schoolId"]
+    },
+    "School": {
+      "title": "School",
+      "description": "School institutional profile",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "code": { "type": "string" },
+        "province": { "type": "string" },
+        "district": { "type": "string" },
+        "address": { "type": "string" },
+        "principalName": { "type": "string" },
+        "academicYear": { "type": "string" }
+      },
+      "required": ["id", "name", "code"]
+    },
+    "Question": {
+      "title": "Question",
+      "description": "Curriculum-aligned Informatics question",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "code": { "type": "string" },
+        "content": { "type": "string" },
+        "gradeLevel": { "type": "number" },
+        "topic": { "type": "string" },
+        "lessonTitle": { "type": "string" },
+        "learningOutcome": { "type": "string" },
+        "difficulty": { "type": "string", "enum": ["BIET", "HIEU", "VAN_DUNG"] },
+        "type": { "type": "string", "enum": ["SINGLE_CHOICE", "MULTIPLE_CHOICE", "TRUE_FALSE", "FILL_IN_BLANK", "ESSAY"] },
+        "explanation": { "type": "string" },
+        "createdBy": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "status": { "type": "string", "enum": ["ACTIVE", "DRAFT"] }
+      },
+      "required": ["id", "content", "gradeLevel", "difficulty", "type", "createdBy"]
+    },
+    "Test": {
+      "title": "Test",
+      "description": "Informatics examination specification with matrix and variants",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "gradeLevel": { "type": "number" },
+        "durationMinutes": { "type": "number" },
+        "totalQuestions": { "type": "number" },
+        "totalPoints": { "type": "number" },
+        "createdBy": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "status": { "type": "string", "enum": ["DRAFT", "READY"] }
+      },
+      "required": ["id", "title", "gradeLevel", "durationMinutes", "totalQuestions", "createdBy"]
+    },
+    "Assignment": {
+      "title": "Assignment",
+      "description": "Scheduled exam assigned to specific school classes",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "testId": { "type": "string" },
+        "testTitle": { "type": "string" },
+        "gradeLevel": { "type": "number" },
+        "startTime": { "type": "string" },
+        "endTime": { "type": "string" },
+        "status": { "type": "string", "enum": ["UPCOMING", "ACTIVE", "CLOSED"] },
+        "assignedBy": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "testId", "gradeLevel", "startTime", "endTime", "assignedBy"]
+    },
+    "Submission": {
+      "title": "Submission",
+      "description": "Student exam submission with score and evaluation state",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "assignmentId": { "type": "string" },
+        "testId": { "type": "string" },
+        "studentId": { "type": "string" },
+        "studentName": { "type": "string" },
+        "studentCode": { "type": "string" },
+        "classId": { "type": "string" },
+        "score": { "type": "number" },
+        "maxScore": { "type": "number" },
+        "correctCount": { "type": "number" },
+        "totalQuestions": { "type": "number" },
+        "startedAt": { "type": "string" },
+        "submittedAt": { "type": "string" },
+        "status": { "type": "string", "enum": ["IN_PROGRESS", "COMPLETED", "PENDING_ESSAY_GRADING"] }
+      },
+      "required": ["id", "assignmentId", "testId", "studentId", "classId", "status"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profiles and RBAC role assignments"
+    },
+    "/schools/{schoolId}": {
+      "schema": "School",
+      "description": "School information and configuration"
+    },
+    "/academicYears/{yearId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "School academic years"
+    },
+    "/grades/{gradeId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Grades (Khối 6, 7, 8, 9)"
+    },
+    "/classes/{classId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Classes (6/1, 6/2, etc.)"
+    },
+    "/students/{studentId}": {
+      "schema": "User",
+      "description": "Student detailed educational profiles"
+    },
+    "/teachers/{teacherId}": {
+      "schema": "User",
+      "description": "Teacher educational profiles and subjects"
+    },
+    "/subjects/{subjectId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Informatics subject details"
+    },
+    "/lessons/{lessonId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Curriculum lessons by topic"
+    },
+    "/materials/{materialId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Digital learning materials and slides"
+    },
+    "/questions/{questionId}": {
+      "schema": "Question",
+      "description": "Question bank items protected from unauthorized student view"
+    },
+    "/questionBanks/{bankId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Question bank collections by grade and semester"
+    },
+    "/tests/{testId}": {
+      "schema": "Test",
+      "description": "Tests and exam papers with matrix specifications"
+    },
+    "/testQuestions/{testQuestionId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Question maps per exam variant"
+    },
+    "/assignments/{assignmentId}": {
+      "schema": "Assignment",
+      "description": "Scheduled exam assignments for classes"
+    },
+    "/submissions/{submissionId}": {
+      "schema": "Submission",
+      "description": "Student exam submissions and scores"
+    },
+    "/answers/{answerId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Individual student question responses"
+    },
+    "/learningProgress/{progressId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Student completion and skill progress"
+    },
+    "/reports/{reportId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Aggregated grade and item analysis reports"
+    },
+    "/systemSettings/{settingId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "LMS system configuration and integration parameters"
+    }
+  }
+}

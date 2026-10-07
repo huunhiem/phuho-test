@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e3a8a" />
+      <stop offset="50%" stop-color="#2563eb" />
+      <stop offset="100%" stop-color="#1d4ed8" />
+    </linearGradient>
+    <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fef08a" />
+      <stop offset="50%" stop-color="#eab308" />
+      <stop offset="100%" stop-color="#ca8a04" />
+    </linearGradient>
+    <linearGradient id="shieldGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" />
+      <stop offset="100%" stop-color="#f1f5f9" />
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="8" stdDeviation="12" flood-color="#0f172a" flood-opacity="0.25"/>
+    </filter>
+  </defs>
+
+  <!-- Background base -->
+  <rect width="512" height="512" rx="64" fill="#ffffff"/>
+
+  <!-- Main circular seal -->
+  <g filter="url(#shadow)">
+    <circle cx="256" cy="256" r="224" fill="url(#bgGrad)"/>
+    <circle cx="256" cy="256" r="212" fill="none" stroke="url(#goldGrad)" stroke-width="6"/>
+    <circle cx="256" cy="256" r="202" fill="none" stroke="#ffffff" stroke-width="2" stroke-dasharray="6 6"/>
+    <circle cx="256" cy="256" r="150" fill="none" stroke="url(#goldGrad)" stroke-width="4"/>
+    <circle cx="256" cy="256" r="144" fill="#ffffff" fill-opacity="0.08"/>
+  </g>
+
+  <!-- Top arc text: CỔNG KIỂM TRA TRỰC TUYẾN -->
+  <path id="textArcTop" d="M 96 256 A 160 160 0 0 1 416 256" fill="none" stroke="none" />
+  <text font-family="Arial, Helvetica, sans-serif" font-weight="900" font-size="20" fill="#ffffff" letter-spacing="3.5">
+    <textPath href="#textArcTop" startOffset="50%" text-anchor="middle">
+      CỔNG KIỂM TRA TRỰC TUYẾN
+    </textPath>
+  </text>
+
+  <!-- Bottom arc text: TRƯỜNG THCS PHÚ HỒ -->
+  <path id="textArcBottom" d="M 416 256 A 160 160 0 0 1 96 256" fill="none" stroke="none" />
+  <text font-family="Arial, Helvetica, sans-serif" font-weight="800" font-size="21" fill="url(#goldGrad)" letter-spacing="4">
+    <textPath href="#textArcBottom" startOffset="50%" text-anchor="middle">
+      TRƯỜNG THCS PHÚ HỒ
+    </textPath>
+  </text>
+
+  <!-- Side Decorative Stars -->
+  <g fill="url(#goldGrad)">
+    <polygon points="82,256 86,244 98,244 88,252 92,264 82,256 72,264 76,252 66,244 78,244" transform="scale(0.8) translate(20, 64)"/>
+    <polygon points="82,256 86,244 98,244 88,252 92,264 82,256 72,264 76,252 66,244 78,244" transform="scale(0.8) translate(510, 64)"/>
+  </g>
+
+  <!-- Center Emblem (Shield + Graduation Cap + Book + Tech/Pen) -->
+  <g transform="translate(146, 146)">
+    <!-- Shield Container -->
+    <path d="M 110 10 L 190 40 C 190 140 110 200 110 200 C 110 200 30 140 30 40 Z" 
+          fill="url(#shieldGrad)" stroke="url(#goldGrad)" stroke-width="6" />
+
+    <!-- Graduation Cap -->
+    <path d="M 110 50 L 165 75 L 110 100 L 55 75 Z" fill="#1e3a8a"/>
+    <path d="M 80 92 L 80 120 C 80 132 140 132 140 120 L 140 92" fill="#2563eb"/>
+    <circle cx="110" cy="75" r="4" fill="#eab308"/>
+    <!-- Tassel -->
+    <path d="M 110 75 Q 155 85 160 115" stroke="#eab308" stroke-width="3" fill="none"/>
+    <circle cx="160" cy="116" r="3" fill="#ca8a04"/>
+
+    <!-- Open Book -->
+    <g transform="translate(58, 126)">
+      <path d="M 52 14 C 36 6 16 8 0 14 L 0 50 C 16 44 36 42 52 48 C 68 42 88 44 104 50 L 104 14 C 88 8 68 6 52 14 Z" fill="#ffffff" stroke="#1d4ed8" stroke-width="3"/>
+      <path d="M 52 14 L 52 48" stroke="#ca8a04" stroke-width="3"/>
+      <!-- Book Lines -->
+      <line x1="12" y1="24" x2="42" y2="24" stroke="#94a3b8" stroke-width="2.5" stroke-linecap="round"/>
+      <line x1="12" y1="32" x2="38" y2="32" stroke="#94a3b8" stroke-width="2.5" stroke-linecap="round"/>
+      <line x1="12" y1="40" x2="32" y2="40" stroke="#94a3b8" stroke-width="2.5" stroke-linecap="round"/>
+      <line x1="62" y1="24" x2="92" y2="24" stroke="#94a3b8" stroke-width="2.5" stroke-linecap="round"/>
+      <line x1="62" y1="32" x2="88" y2="32" stroke="#94a3b8" stroke-width="2.5" stroke-linecap="round"/>
+      <line x1="62" y1="40" x2="82" y2="40" stroke="#94a3b8" stroke-width="2.5" stroke-linecap="round"/>
+    </g>
+
+    <!-- Small Checkmark / Laurel inside shield -->
+    <circle cx="110" cy="184" r="7" fill="#10b981"/>
+    <path d="M 106 184 L 109 187 L 115 181" stroke="#ffffff" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+</svg>
