@@ -21,25 +21,29 @@ import { LoginScreen } from './components/auth/LoginScreen';
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
-    const stored = LMSStorageService.getStoredUser();
-    if (!stored) return null;
+  const stored = LMSStorageService.getStoredUser();
 
-    // Luôn xác thực lại với danh sách người dùng trong hệ thống để bảo đảm đúng vai trò gắn với tài khoản
-    const allUsers = LMSStorageService.getUsers();
-    const authoritative = allUsers.find(
-      (u) => u.id === stored.id || u.username.toLowerCase() === stored.username.toLowerCase()
-    );
+  if (!stored) {
+    return null;
+  }
 
-    if (authoritative) {
-      if (authoritative.status === 'LOCKED') {
-        LMSStorageService.clearCurrentUser();
-        return null;
-      }
-      return authoritative;
-    }
-    return stored;
-  });
+  const status = String(
+    (stored as any).status ??
+    (stored as any).Status ??
+    'ACTIVE'
+  ).toUpperCase();
 
+  if (
+    status === 'LOCKED' ||
+    status === '0' ||
+    status === 'FALSE'
+  ) {
+    LMSStorageService.clearCurrentUser();
+    return null;
+  }
+
+  return stored;
+});
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const getDefaultTabForRole = (role: UserRole): NavTab => {
