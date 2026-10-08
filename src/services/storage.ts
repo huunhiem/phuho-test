@@ -1,3 +1,4 @@
+import { LMSApi } from './api';
 import {
   School,
   AcademicYear,
@@ -84,11 +85,74 @@ function setStored<T>(key: string, value: T): void {
 
 export class LMSStorageService {
   // Current logged in user
-  static getCurrentUser(): User {
-    const defaultUser = INITIAL_USERS[0]; // Admin by default or teacher
-    return getStored<User>(STORAGE_KEYS.CURRENT_USER, defaultUser);
+  static getCurrentUser(): User | null {
+  return this.getStoredUser();
+  }
+  static async login(
+  username: string,
+  password: string
+  ): Promise<User> {
+
+  const user = await LMSApi.login(
+    username,
+    password
+  );
+
+  if (!user) {
+    throw new Error(
+      'Tên đăng nhập hoặc mật khẩu không chính xác!'
+    );
   }
 
+  const normalizedUser: User = {
+    ...user,
+
+    id: String(
+      user.id ??
+      user.ID ??
+      ''
+    ),
+
+    username: String(
+      user.username ??
+      user.Username ??
+      user.taiKhoan ??
+      user.TenDangNhap ??
+      ''
+    ),
+
+    fullName: String(
+      user.fullName ??
+      user.FullName ??
+      user.hoTen ??
+      user.HoTen ??
+      ''
+    ),
+
+    role:
+      user.role ??
+      user.Role ??
+      'STUDENT',
+
+    status:
+      user.status ??
+      user.Status ??
+      'ACTIVE'
+  } as User;
+
+  // Không lưu mật khẩu vào trình duyệt
+  const safeUser = {
+    ...normalizedUser
+  } as any;
+
+  delete safeUser.password;
+  delete safeUser.Password;
+  delete safeUser.matKhau;
+
+  this.setCurrentUser(safeUser);
+
+  return safeUser;
+}
   static getStoredUser(): User | null {
     try {
       const raw = localStorage.getItem(STORAGE_KEYS.CURRENT_USER);
