@@ -1,3 +1,4 @@
+const API_URL = import.meta.env.VITE_APPS_SCRIPT_URL;
 import { LMSApi } from './api';
 import {
   School,
@@ -170,6 +171,109 @@ export class LMSStorageService {
   static clearCurrentUser(): void {
     localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
   }
+  static async login(
+  username: string,
+  password: string
+): Promise<User> {
+  if (!API_URL) {
+    throw new Error(
+      'Chưa cấu hình VITE_APPS_SCRIPT_URL trên Vercel.'
+    );
+  }
+
+  const response = await fetch(API_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'text/plain;charset=utf-8'
+    },
+    body: JSON.stringify({
+      action: 'login',
+      username: username.trim(),
+      password: password
+    })
+  });
+
+  const text = await response.text();
+
+  console.log('LOGIN API RESPONSE:', text);
+
+  let result: any;
+
+  try {
+    result = JSON.parse(text);
+  } catch {
+    throw new Error(
+      'Google Apps Script không trả về JSON hợp lệ.'
+    );
+  }
+
+  if (!result.success) {
+    throw new Error(
+      result.error ||
+      result.message ||
+      'Tên đăng nhập hoặc mật khẩu không chính xác!'
+    );
+  }
+
+  const apiUser =
+    result.data?.user ||
+    result.user;
+
+  if (!apiUser) {
+    throw new Error(
+      'API đăng nhập không trả về thông tin tài khoản.'
+    );
+  }
+
+  const normalizedUser = {
+    ...apiUser,
+
+    id: String(
+      apiUser.id ??
+      apiUser.ID ??
+      ''
+    ),
+
+    username: String(
+      apiUser.username ??
+      apiUser.Username ??
+      apiUser.taiKhoan ??
+      apiUser.TenDangNhap ??
+      username
+    ),
+
+    fullName: String(
+      apiUser.fullName ??
+      apiUser.FullName ??
+      apiUser.hoTen ??
+      apiUser.HoTen ??
+      ''
+    ),
+
+    role:
+      apiUser.role ??
+      apiUser.Role ??
+      'STUDENT',
+
+    status:
+      apiUser.status ??
+      apiUser.Status ??
+      'ACTIVE'
+  } as User;
+
+  // Không lưu mật khẩu
+  const safeUser = {
+    ...normalizedUser
+  } as any;
+
+  delete safeUser.password;
+  delete safeUser.Password;
+  delete safeUser.matKhau;
+
+  this.setCurrentUser(safeUser);
+
+  return safeUser;
+}
 
   // School
   static getSchool(): School {
