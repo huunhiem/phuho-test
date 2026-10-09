@@ -317,6 +317,16 @@ export class LMSStorageService {
     notifyChange('classes');
   }
 
+  static importClasses(newClasses: ClassRoom[]): void {
+    const existing = this.getClasses();
+    const map = new Map<string, ClassRoom>();
+    existing.forEach((c) => map.set(c.id, c));
+    newClasses.forEach((c) => map.set(c.id, c));
+    const merged = Array.from(map.values());
+    setStored(STORAGE_KEYS.CLASSES, merged);
+    notifyChange('classes');
+  }
+
   // Users
   static getUsers(): User[] {
     return getStored<User[]>(STORAGE_KEYS.USERS, INITIAL_USERS);
@@ -452,6 +462,16 @@ export class LMSStorageService {
     notifyChange('questions');
   }
 
+  static importQuestions(newQuestions: Question[]): void {
+    const existing = this.getQuestions();
+    const map = new Map<string, Question>();
+    existing.forEach((q) => map.set(q.id, q));
+    newQuestions.forEach((q) => map.set(q.id, q));
+    const merged = Array.from(map.values());
+    setStored(STORAGE_KEYS.QUESTIONS, merged);
+    notifyChange('questions');
+  }
+
   // Tests
   static getTests(): Test[] {
     return getStored<Test[]>(STORAGE_KEYS.TESTS, INITIAL_TESTS);
@@ -512,6 +532,16 @@ export class LMSStorageService {
   static updateSubmission(sub: Submission): void {
     const list = this.getSubmissions().map((s) => (s.id === sub.id ? sub : s));
     setStored(STORAGE_KEYS.SUBMISSIONS, list);
+    notifyChange('submissions');
+  }
+
+  static importSubmissions(newSubs: Submission[]): void {
+    const existing = this.getSubmissions();
+    const map = new Map<string, Submission>();
+    existing.forEach((s) => map.set(s.id, s));
+    newSubs.forEach((s) => map.set(s.id, s));
+    const merged = Array.from(map.values());
+    setStored(STORAGE_KEYS.SUBMISSIONS, merged);
     notifyChange('submissions');
   }
 

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   Users,
   GraduationCap,
@@ -9,9 +9,13 @@ import {
   CheckCircle2,
   TrendingUp,
   PlusCircle,
-  FileSpreadsheet
+  FileSpreadsheet,
+  RefreshCw,
+  Globe,
+  Calendar
 } from 'lucide-react';
 import { LMSStorageService } from '../../services/storage';
+import { GoogleSheetsService } from '../../services/googleSheetsService';
 import { NavTab } from '../Sidebar';
 
 interface AdminDashboardProps {
@@ -25,6 +29,52 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
   const tests = LMSStorageService.getTests();
   const assignments = LMSStorageService.getAssignments();
   const submissions = LMSStorageService.getSubmissions();
+
+  const [school, setSchool] = useState(() => LMSStorageService.getSchool());
+  const [academicYear, setAcademicYear] = useState(() => school.academicYear || '2025-2026');
+  const [customYearInput, setCustomYearInput] = useState('');
+  const [isCustomYear, setIsCustomYear] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncNotice, setSyncNotice] = useState<string | null>(null);
+
+  const handleYearChange = (yearVal: string) => {
+    if (yearVal === 'custom') {
+      setIsCustomYear(true);
+      return;
+    }
+    setIsCustomYear(false);
+    setAcademicYear(yearVal);
+    const updated = { ...school, academicYear: yearVal };
+    setSchool(updated);
+    LMSStorageService.updateSchool(updated);
+  };
+
+  const handleApplyCustomYear = () => {
+    if (!customYearInput.trim()) return;
+    const yearVal = customYearInput.trim();
+    setAcademicYear(yearVal);
+    setIsCustomYear(false);
+    const updated = { ...school, academicYear: yearVal };
+    setSchool(updated);
+    LMSStorageService.updateSchool(updated);
+  };
+
+  const handleSyncGoogleSheet = async () => {
+    setIsSyncing(true);
+    setSyncNotice('Đang kết nối Google Sheet...');
+    try {
+      const res = await GoogleSheetsService.syncFromAppsScript();
+      if (res.success) {
+        setSyncNotice(`Đồng bộ thành công! ${res.users} tài khoản, ${res.classes} lớp, ${res.questions} câu hỏi.`);
+      } else {
+        setSyncNotice(res.error || 'Lỗi đồng bộ Google Sheet');
+      }
+    } catch (e: any) {
+      setSyncNotice(e.message || 'Lỗi kết nối');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
 
   const students = users.filter((u) => u.role === 'STUDENT');
   const teachers = users.filter((u) => u.role === 'TEACHER' || u.role === 'DEPARTMENT_HEAD');
@@ -48,11 +98,28 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
             Quản lý tập trung học sinh, giáo viên, ngân hàng câu hỏi môn Tin học - Trường THCS Phú Hồ
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={handleSyncGoogleSheet}
+            disabled={isSyncing}
+            className="inline-flex items-center gap-2 px-3 py-2 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-lg transition-colors border border-emerald-200 cursor-pointer disabled:opacity-50"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+            <span>{isSyncing ? 'Đang đồng bộ...' : 'Đồng bộ Google Sheet'}</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => onNavigate('google_sheets')}
+            className="inline-flex items-center gap-2 px-3 py-2 text-xs font-semibold text-sky-700 bg-sky-50 hover:bg-sky-100 rounded-lg transition-colors border border-sky-200 cursor-pointer"
+          >
+            <Globe className="w-3.5 h-3.5" />
+            <span>Hướng dẫn Vercel</span>
+          </button>
           <button
             type="button"
             onClick={() => onNavigate('admin_import')}
-            className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors border border-indigo-200"
+            className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors border border-indigo-200 cursor-pointer"
           >
             <FileSpreadsheet className="w-4 h-4" />
             <span>Import Excel</span>
@@ -60,13 +127,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
           <button
             type="button"
             onClick={() => onNavigate('admin_users')}
-            className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-xs transition-colors"
+            className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-xs transition-colors cursor-pointer"
           >
             <PlusCircle className="w-4 h-4" />
             <span>Thêm tài khoản</span>
           </button>
         </div>
       </div>
+
+      {syncNotice && (
+        <div className="p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>{syncNotice}</span>
+          </div>
+          <button type="button" onClick={() => setSyncNotice(null)} className="text-emerald-700 font-bold hover:underline">
+            Đóng
+          </button>
+        </div>
+      )}
 
       {/* Metric Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -168,11 +247,51 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
             </div>
             <div className="flex justify-between py-1 border-b border-slate-100">
               <span className="text-slate-500">Địa chỉ:</span>
-              <span>Xã Phú Hồ, Huyện Phú Vang, Thừa Thiên Huế</span>
+              <span className="font-medium text-slate-800">Xã Phú Hồ, thành phố Huế</span>
             </div>
-            <div className="flex justify-between py-1 border-b border-slate-100">
-              <span className="text-slate-500">Năm học:</span>
-              <span className="font-semibold text-indigo-600">2025 - 2026</span>
+            <div className="flex items-center justify-between py-1 border-b border-slate-100">
+              <span className="text-slate-500">Niên khóa:</span>
+              <div className="flex items-center gap-2">
+                {!isCustomYear ? (
+                  <select
+                    value={academicYear}
+                    onChange={(e) => handleYearChange(e.target.value)}
+                    className="text-xs font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-md px-2.5 py-1 focus:outline-hidden cursor-pointer"
+                  >
+                    <option value="2025-2026">2025 - 2026</option>
+                    <option value="2024-2025">2024 - 2025</option>
+                    <option value="2026-2027">2026 - 2027</option>
+                    <option value="custom">Tự chọn khác...</option>
+                  </select>
+                ) : (
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="text"
+                      placeholder="VD: 2027-2028"
+                      value={customYearInput}
+                      onChange={(e) => setCustomYearInput(e.target.value)}
+                      className="text-xs border border-indigo-300 rounded px-2 py-1 w-24 text-slate-800"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleApplyCustomYear}
+                      className="text-xs bg-indigo-600 text-white px-2 py-1 rounded font-medium cursor-pointer"
+                    >
+                      Lưu
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsCustomYear(false)}
+                      className="text-xs text-slate-500 hover:text-slate-700 px-1 cursor-pointer"
+                    >
+                      Hủy
+                    </button>
+                  </div>
+                )}
+                <span className="text-[11px] text-emerald-700 bg-emerald-100 font-semibold px-2 py-0.5 rounded">
+                  Tự chọn
+                </span>
+              </div>
             </div>
             <div className="flex justify-between py-1 border-b border-slate-100">
               <span className="text-slate-500">Môn học:</span>

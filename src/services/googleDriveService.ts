@@ -298,6 +298,47 @@ export class GoogleDriveService {
   }
 
   /**
+   * Chuyển đổi mọi đường dẫn Google Drive (chia sẻ, view, thumbnail, direct link) thành URL nhúng trực tiếp an toàn
+   * Hỗ trợ hiển thị ảnh câu hỏi ổn định 100% trên Vercel và GitHub không bị chặn CORS
+   */
+  static getDriveDirectImageUrl(driveUrlOrId: string): string {
+    if (!driveUrlOrId || typeof driveUrlOrId !== 'string') return '';
+    const trimmed = driveUrlOrId.trim();
+    if (!trimmed) return '';
+    
+    // Nếu là base64 data url hoặc url http thông thường không phải drive
+    if (trimmed.startsWith('data:image/') || (!trimmed.includes('drive.google.com') && !trimmed.includes('googleusercontent.com'))) {
+      return trimmed;
+    }
+
+    // Trích xuất File ID từ nhiều định dạng link Google Drive khác nhau
+    // 1. https://drive.google.com/file/d/FILE_ID/view...
+    // 2. https://drive.google.com/open?id=FILE_ID
+    // 3. https://drive.google.com/uc?id=FILE_ID
+    // 4. https://lh3.googleusercontent.com/d/FILE_ID
+    let fileId = '';
+    const matchFileD = trimmed.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+    const matchIdParam = trimmed.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+    const matchLh3 = trimmed.match(/\/d\/([a-zA-Z0-9_-]+)/);
+
+    if (matchFileD && matchFileD[1]) {
+      fileId = matchFileD[1];
+    } else if (matchIdParam && matchIdParam[1]) {
+      fileId = matchIdParam[1];
+    } else if (matchLh3 && matchLh3[1]) {
+      fileId = matchLh3[1];
+    } else if (/^[a-zA-Z0-9_-]{20,}$/.test(trimmed)) {
+      fileId = trimmed;
+    }
+
+    if (fileId) {
+      return `https://lh3.googleusercontent.com/d/${fileId}`;
+    }
+
+    return trimmed;
+  }
+
+  /**
    * Lưu trữ danh sách câu hỏi kiểm tra lên Google Drive
    * Xuất cả file JSON và tài liệu tổng hợp có link nguồn ảnh Drive
    */

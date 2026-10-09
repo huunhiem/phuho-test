@@ -741,55 +741,59 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({ currentUser }) => {
               </div>
 
               {/* Question Image Attachment Preview */}
-              {q.imageUrl && (
-                <div className="flex flex-wrap items-center gap-3 p-2.5 rounded-lg bg-slate-50 border border-slate-200/80">
-                  <div
-                    className="relative cursor-pointer group shrink-0"
-                    onClick={() =>
-                      setZoomImageModal({
-                        url: q.imageUrl!,
-                        title: `Câu hỏi ${q.code}`,
-                        driveUrl: q.imageDriveUrl
-                      })
-                    }
-                    title="Bấm để phóng to hình"
-                  >
-                    <img
-                      src={q.imageUrl}
-                      alt={`Hình câu ${q.code}`}
-                      className="w-24 h-18 object-cover rounded-md border border-slate-200 group-hover:opacity-90 transition-opacity bg-white"
-                      onError={(e) => {
-                        if (q.imageDriveUrl && e.currentTarget.src !== q.imageDriveUrl) {
-                          e.currentTarget.src = q.imageDriveUrl;
-                        }
-                      }}
-                    />
-                    <div className="absolute inset-0 bg-slate-900/40 opacity-0 group-hover:opacity-100 flex items-center justify-center rounded-md transition-opacity">
-                      <Maximize2 className="w-3.5 h-3.5 text-white" />
+              {(q.imageUrl || q.imageDriveUrl) && (() => {
+                const directImg = GoogleDriveService.getDriveDirectImageUrl(q.imageUrl || q.imageDriveUrl || '');
+                if (!directImg) return null;
+                return (
+                  <div className="flex flex-wrap items-center gap-3 p-2.5 rounded-lg bg-slate-50 border border-slate-200/80">
+                    <div
+                      className="relative cursor-pointer group shrink-0"
+                      onClick={() =>
+                        setZoomImageModal({
+                          url: directImg,
+                          title: `Câu hỏi ${q.code}`,
+                          driveUrl: q.imageDriveUrl
+                        })
+                      }
+                      title="Bấm để phóng to hình"
+                    >
+                      <img
+                        src={directImg}
+                        alt={`Hình câu ${q.code}`}
+                        className="w-24 h-18 object-cover rounded-md border border-slate-200 group-hover:opacity-90 transition-opacity bg-white"
+                        onError={(e) => {
+                          if (q.imageDriveUrl && e.currentTarget.src !== q.imageDriveUrl) {
+                            e.currentTarget.src = q.imageDriveUrl;
+                          }
+                        }}
+                      />
+                      <div className="absolute inset-0 bg-slate-900/40 opacity-0 group-hover:opacity-100 flex items-center justify-center rounded-md transition-opacity">
+                        <Maximize2 className="w-3.5 h-3.5 text-white" />
+                      </div>
+                    </div>
+                    <div className="flex-1 min-w-[200px] text-xs">
+                      <div className="font-semibold text-slate-800 flex items-center gap-1.5">
+                        <ImageIcon className="w-3.5 h-3.5 text-indigo-600" />
+                        <span>Hình ảnh đính kèm câu hỏi</span>
+                      </div>
+                      <div className="text-[11px] text-slate-500 mt-0.5">
+                        Bấm vào hình để phóng to xem đầy đủ
+                      </div>
+                      {q.imageDriveUrl && (
+                        <a
+                          href={q.imageDriveUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 mt-1 text-[11px] font-medium text-blue-600 hover:text-blue-800 hover:underline"
+                        >
+                          <ExternalLink className="w-3 h-3" />
+                          <span>Xem nguồn trên Google Drive</span>
+                        </a>
+                      )}
                     </div>
                   </div>
-                  <div className="flex-1 min-w-[200px] text-xs">
-                    <div className="font-semibold text-slate-800 flex items-center gap-1.5">
-                      <ImageIcon className="w-3.5 h-3.5 text-indigo-600" />
-                      <span>Hình ảnh đính kèm câu hỏi</span>
-                    </div>
-                    <div className="text-[11px] text-slate-500 mt-0.5">
-                      Bấm vào hình để phóng to xem đầy đủ
-                    </div>
-                    {q.imageDriveUrl && (
-                      <a
-                        href={q.imageDriveUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 mt-1 text-[11px] font-medium text-blue-600 hover:text-blue-800 hover:underline"
-                      >
-                        <ExternalLink className="w-3 h-3" />
-                        <span>Xem nguồn trên Google Drive</span>
-                      </a>
-                    )}
-                  </div>
-                </div>
-              )}
+                );
+              })()}
 
               {/* Options or Answer hints Preview */}
               {q.type === 'SINGLE_CHOICE' || q.type === 'MULTIPLE_CHOICE' ? (

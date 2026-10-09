@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { Assignment, Test, Question, User, Submission } from '../../types';
 import { LMSStorageService } from '../../services/storage';
+import { GoogleDriveService } from '../../services/googleDriveService';
 
 interface ExamRoomProps {
   assignment: Assignment;
@@ -399,52 +400,55 @@ export const ExamRoom: React.FC<ExamRoomProps> = ({
               </div>
 
               {/* Question Image Attachment (Google Drive / Source) */}
-              {currentQ.imageUrl && (
-                <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 flex flex-col items-center gap-2">
-                  <div className="relative group max-w-full flex justify-center">
-                    <img
-                      src={currentQ.imageUrl}
-                      alt={`Hình ảnh minh họa câu ${currentIndex + 1}`}
-                      className="max-h-72 max-w-full object-contain rounded-lg border border-slate-200/80 shadow-xs cursor-pointer hover:opacity-95 transition-all"
-                      onClick={() => setZoomImageUrl(currentQ.imageUrl || null)}
-                      onError={(e) => {
-                        // Fallback to imageDriveUrl if thumbnail fails
-                        if (currentQ.imageDriveUrl && e.currentTarget.src !== currentQ.imageDriveUrl) {
-                          e.currentTarget.src = currentQ.imageDriveUrl;
-                        }
-                      }}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setZoomImageUrl(currentQ.imageUrl || null)}
-                      className="absolute bottom-2 right-2 p-1.5 bg-slate-900/70 hover:bg-slate-900 text-white rounded-lg text-xs backdrop-blur-xs flex items-center gap-1 opacity-90 group-hover:opacity-100 transition-opacity"
-                      title="Phóng to hình ảnh"
-                    >
-                      <Maximize2 className="w-3.5 h-3.5" />
-                      <span className="hidden sm:inline">Phóng to</span>
-                    </button>
-                  </div>
-
-                  <div className="flex flex-wrap items-center justify-between w-full pt-1 px-1 text-[11px] text-slate-500 border-t border-slate-200/60">
-                    <span className="flex items-center gap-1 text-slate-600">
-                      <ImageIcon className="w-3.5 h-3.5 text-indigo-500" />
-                      <span>Hình minh họa kèm theo câu hỏi (bấm vào hình để phóng to)</span>
-                    </span>
-                    {currentQ.imageDriveUrl && (
-                      <a
-                        href={currentQ.imageDriveUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-blue-600 hover:text-blue-700 flex items-center gap-1 font-medium hover:underline ml-auto"
-                        title="Xem file gốc trên Google Drive"
+              {(currentQ.imageUrl || currentQ.imageDriveUrl) && (() => {
+                const effectiveImg = GoogleDriveService.getDriveDirectImageUrl(currentQ.imageUrl || currentQ.imageDriveUrl || '');
+                if (!effectiveImg) return null;
+                return (
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 flex flex-col items-center gap-2">
+                    <div className="relative group max-w-full flex justify-center">
+                      <img
+                        src={effectiveImg}
+                        alt={`Hình ảnh minh họa câu ${currentIndex + 1}`}
+                        className="max-h-72 max-w-full object-contain rounded-lg border border-slate-200/80 shadow-xs cursor-pointer hover:opacity-95 transition-all"
+                        onClick={() => setZoomImageUrl(effectiveImg)}
+                        onError={(e) => {
+                          if (currentQ.imageDriveUrl && e.currentTarget.src !== currentQ.imageDriveUrl) {
+                            e.currentTarget.src = currentQ.imageDriveUrl;
+                          }
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setZoomImageUrl(effectiveImg)}
+                        className="absolute bottom-2 right-2 p-1.5 bg-slate-900/70 hover:bg-slate-900 text-white rounded-lg text-xs backdrop-blur-xs flex items-center gap-1 opacity-90 group-hover:opacity-100 transition-opacity cursor-pointer"
+                        title="Phóng to hình ảnh"
                       >
-                        <ExternalLink className="w-3 h-3" />
-                        <span>Nguồn Google Drive</span>
-                      </a>
-                    )}
+                        <Maximize2 className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline">Phóng to</span>
+                      </button>
+                    </div>
+
+                    <div className="flex flex-wrap items-center justify-between w-full pt-1 px-1 text-[11px] text-slate-500 border-t border-slate-200/60">
+                      <span className="flex items-center gap-1 text-slate-600">
+                        <ImageIcon className="w-3.5 h-3.5 text-indigo-500" />
+                        <span>Hình minh họa kèm theo câu hỏi (bấm vào hình để phóng to)</span>
+                      </span>
+                      {currentQ.imageDriveUrl && (
+                        <a
+                          href={currentQ.imageDriveUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-600 hover:text-blue-700 flex items-center gap-1 font-medium hover:underline ml-auto"
+                          title="Xem file gốc trên Google Drive"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                          <span>Google Drive</span>
+                        </a>
+                      )}
+                    </div>
                   </div>
-                </div>
-              )}
+                );
+              })()}
 
               {/* Answer Interaction based on Question Type */}
               <div className="space-y-3 pt-2">

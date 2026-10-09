@@ -162,6 +162,24 @@ export const getSavedSheetId = (): string => {
   return localStorage.getItem(SHEET_ID_KEY) || '';
 };
 
+export const APPS_SCRIPT_URL_KEY = 'phuho_lms_apps_script_url';
+export const DEFAULT_APPS_SCRIPT_URL =
+  'https://script.google.com/macros/s/AKfycbx3p_wb8t8BWTx0ZqK6coG2icwx77N-cD4YfNoFVUd-n_yqO_BWVhCOdGmMoaCUvOSMjw/exec';
+
+export const getAppsScriptUrl = (): string => {
+  const local = localStorage.getItem(APPS_SCRIPT_URL_KEY);
+  if (local && local.trim()) return local.trim();
+  const envScript = (import.meta as any).env?.VITE_APPS_SCRIPT_URL;
+  if (envScript && envScript.trim()) return envScript.trim();
+  const envAppUrl = (import.meta as any).env?.VITE_APP_URL || (import.meta as any).env?.APP_URL;
+  if (envAppUrl && String(envAppUrl).includes('script.google.com')) return String(envAppUrl).trim();
+  return DEFAULT_APPS_SCRIPT_URL;
+};
+
+export const saveAppsScriptUrl = (url: string): void => {
+  localStorage.setItem(APPS_SCRIPT_URL_KEY, url.trim());
+};
+
 export const saveSheetId = (sheetId: string): void => {
   localStorage.setItem(SHEET_ID_KEY, sheetId.trim());
   if (cachedAccessToken && sheetId.trim()) {
@@ -635,9 +653,10 @@ export class GoogleSheetsService {
 
     const sheetId = getSavedSheetId();
     const token = getGoogleAccessToken();
+    const scriptUrl = getAppsScriptUrl();
 
-    // Nếu chưa cấu hình Google Sheet hoặc chưa đăng nhập thì không thể auto-sync
-    if (!sheetId || !token) {
+    // Nếu chưa cấu hình Google Sheet OAuth và cũng không có Apps Script URL thì không thể auto-sync
+    if ((!sheetId || !token) && !scriptUrl) {
       notifyAutoSyncListeners({ status: 'disconnected' });
       return;
     }
@@ -655,23 +674,66 @@ export class GoogleSheetsService {
       this.pendingEntities.clear();
 
       try {
-        const hasAll = entitiesToSync.includes('all');
-        if (hasAll) {
-          await this.syncEntity('all', sheetId, token);
-          try {
-            await GoogleDriveService.saveQuestionsToDrive(LMSStorageService.getQuestions(), token);
-          } catch (e) {
-            console.warn('Lỗi tự động lưu câu hỏi lên Drive:', e);
-          }
-        } else {
-          for (const ent of entitiesToSync) {
-            await this.syncEntity(ent as any, sheetId, token);
-          }
-          if (entitiesToSync.includes('questions')) {
+        if (sheetId && token) {
+          const hasAll = entitiesToSync.includes('all');
+          if (hasAll) {
+            await this.syncEntity('all', sheetId, token);
             try {
               await GoogleDriveService.saveQuestionsToDrive(LMSStorageService.getQuestions(), token);
             } catch (e) {
               console.warn('Lỗi tự động lưu câu hỏi lên Drive:', e);
+            }
+          } else {
+            for (const ent of entitiesToSync) {
+              await this.syncEntity(ent as any, sheetId, token);
+            }
+            if (entitiesToSync.includes('questions')) {
+              try {
+                await GoogleDriveService.saveQuestionsToDrive(LMSStorageService.getQuestions(), token);
+              } catch (e) {
+                console.warn('Lỗi tự động lưu câu hỏi lên Drive:', e);
+              }
+            }
+          }
+        }
+
+        // Tự động đẩy dữ liệu lên Google Apps Script Web App nếu có cấu hình
+        if (scriptUrl) {
+          for (const ent of entitiesToSync) {
+            if (ent === 'users' || ent === 'all') {
+              const users = LMSStorageService.getUsers();
+              if (users.length > 0) {
+                const u = users[0];
+                this.postToAppsScript({
+                  action: 'addUser',
+                  id: u.id,
+                  username: u.username,
+                  password: u.password,
+                  fullName: u.fullName,
+                  email: u.email,
+                  role: u.role,
+                  code: u.studentCode || u.teacherCode || '',
+                  className: u.classId || '',
+                  phone: u.phone || ''
+                });
+              }
+            } else if (ent === 'submissions' || ent === 'all') {
+              const subs = LMSStorageService.getSubmissions();
+              if (subs.length > 0) {
+                const s = subs[0];
+                this.postToAppsScript({
+                  action: 'addSubmission',
+                  id: s.id,
+                  studentName: s.studentName,
+                  studentCode: s.studentCode,
+                  className: s.className,
+                  testTitle: s.testTitle,
+                  variantCode: s.variantCode || '101',
+                  score: s.score,
+                  correctCount: s.correctCount,
+                  totalQuestions: s.totalQuestions
+                });
+              }
             }
           }
         }
@@ -874,6 +936,301 @@ export class GoogleSheetsService {
     }
 
     return importedLessons.length;
+  }
+
+  /**
+   * Kiểm tra kết nối tới Google Apps Script Web App của Google Sheet
+   */
+  static async testAppsScriptConnection(): Promise<{ success: boolean; count?: number; message: string }> {
+    const scriptUrl = getAppsScriptUrl();
+    if (!scriptUrl) {
+      return { success: false, message: 'Chưa cấu hình URL Google Apps Script Web App' };
+    }
+
+    try {
+      const res = await fetch(`${scriptUrl}?action=getAccounts`);
+      if (!res.ok) {
+        return { success: false, message: `Lỗi HTTP ${res.status} từ Apps Script` };
+      }
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        return {
+          success: true,
+          count: Math.max(0, data.length - 1),
+          message: `Kết nối thành công! Đã tìm thấy ${Math.max(0, data.length - 1)} tài khoản trong Google Sheet.`
+        };
+      }
+      return { success: false, message: data.error || 'Dữ liệu trả về không hợp lệ' };
+    } catch (err: any) {
+      return { success: false, message: err.message || 'Không thể kết nối tới Google Apps Script URL' };
+    }
+  }
+
+  /**
+   * Đồng bộ toàn bộ dữ liệu (Tài khoản, Lớp học, Câu hỏi, Học sinh, Bảng điểm) từ Google Sheet thông qua Apps Script
+   * Cho phép ứng dụng vận hành mượt mà trên Vercel không cần đăng nhập Google OAuth
+   */
+  static async syncFromAppsScript(): Promise<{
+    users: number;
+    classes: number;
+    questions: number;
+    students: number;
+    success: boolean;
+    error?: string;
+  }> {
+    const scriptUrl = getAppsScriptUrl();
+    if (!scriptUrl) {
+      return { users: 0, classes: 0, questions: 0, students: 0, success: false, error: 'Chưa có Apps Script URL' };
+    }
+
+    notifyAutoSyncListeners({ status: 'syncing', entity: 'all' });
+    let usersCount = 0;
+    let classesCount = 0;
+    let questionsCount = 0;
+    let studentsCount = 0;
+
+    try {
+      // 1. Tải danh sách Lớp học trước
+      try {
+        const clsRes = await fetch(`${scriptUrl}?action=getClasses`);
+        if (clsRes.ok) {
+          const clsData = await clsRes.json();
+          if (Array.isArray(clsData) && clsData.length > 1) {
+            const rows = clsData.slice(1);
+            const importedClasses: any[] = [];
+            for (const row of rows) {
+              if (!row || !row[0]) continue;
+              const id = String(row[0]);
+              let name = String(row[1] || '6/1');
+              if (name.includes('T') && name.includes('-')) {
+                const d = new Date(name);
+                if (!isNaN(d.getTime())) {
+                  name = `${d.getMonth() + 1}/${d.getDate()}`;
+                }
+              }
+              const rawGrade = String(row[2] || '6');
+              const gradeNum = parseInt(rawGrade.replace(/[^0-9]/g, ''), 10) || 6;
+              const count = parseInt(String(row[3] || '35'), 10) || 35;
+              const homeroom = String(row[4] || '');
+
+              importedClasses.push({
+                id,
+                name,
+                gradeId: `grade-${gradeNum}`,
+                academicYearId: 'ay-2025-2026',
+                studentCount: count,
+                homeroomTeacherName: homeroom
+              });
+            }
+            if (importedClasses.length > 0) {
+              LMSStorageService.importClasses(importedClasses);
+              classesCount = importedClasses.length;
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('Lỗi tải classes từ Apps Script:', e);
+      }
+
+      // 2. Tải danh sách Tài khoản
+      try {
+        const accRes = await fetch(`${scriptUrl}?action=getAccounts`);
+        if (accRes.ok) {
+          const accData = await accRes.json();
+          if (Array.isArray(accData) && accData.length > 1) {
+            const rows = accData.slice(1);
+            const classes = LMSStorageService.getClasses();
+            const importedUsers: User[] = [];
+
+            for (const row of rows) {
+              if (!row || !row[1]) continue;
+              const id = String(row[0] || `user-gsheet-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`);
+              const username = String(row[1]).trim();
+              const password = String(row[2] || '123456').trim();
+              const fullName = String(row[3] || username).trim();
+              const email = String(row[4] || `${username}@thcs-phuho.edu.vn`).trim();
+              const rawRole = String(row[5] || 'STUDENT').trim().toUpperCase();
+              const role: UserRole = (['ADMIN', 'PRINCIPAL', 'DEPARTMENT_HEAD', 'TEACHER', 'STUDENT'].includes(rawRole)
+                ? rawRole
+                : 'STUDENT') as UserRole;
+              const code = String(row[6] || '').trim();
+              const gradeStr = String(row[7] || '').trim();
+              let classStr = String(row[8] || '').trim();
+              if (classStr.includes('T') && classStr.includes('-')) {
+                const d = new Date(classStr);
+                if (!isNaN(d.getTime())) {
+                  classStr = `${d.getMonth() + 1}/${d.getDate()}`;
+                }
+              }
+              const phone = String(row[9] || '').trim();
+              const status = String(row[10] || 'ACTIVE').trim().toUpperCase() === 'LOCKED' ? 'LOCKED' : 'ACTIVE';
+              const createdAt = String(row[11] || new Date().toISOString().split('T')[0]);
+
+              const matchedClass = classes.find((c) => c.name === classStr);
+
+              importedUsers.push({
+                id,
+                username,
+                password,
+                fullName,
+                email,
+                role,
+                studentCode: role === 'STUDENT' ? code : undefined,
+                teacherCode: role !== 'STUDENT' ? code : undefined,
+                classId: matchedClass?.id,
+                gradeId:
+                  matchedClass?.gradeId ||
+                  (gradeStr.includes('6')
+                    ? 'grade-6'
+                    : gradeStr.includes('7')
+                    ? 'grade-7'
+                    : gradeStr.includes('8')
+                    ? 'grade-8'
+                    : gradeStr.includes('9')
+                    ? 'grade-9'
+                    : undefined),
+                phone,
+                status,
+                schoolId: 'school-phuho-01',
+                createdAt
+              });
+            }
+
+            if (importedUsers.length > 0) {
+              const existingUsers = LMSStorageService.getUsers();
+              const userMap = new Map<string, User>();
+              existingUsers.forEach((u) => userMap.set(u.username.toLowerCase(), u));
+              importedUsers.forEach((u) => userMap.set(u.username.toLowerCase(), u));
+              const merged = Array.from(userMap.values());
+              localStorage.setItem('phuho_lms_users', JSON.stringify(merged));
+              usersCount = importedUsers.length;
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('Lỗi tải accounts từ Apps Script:', e);
+      }
+
+      // 3. Tải Ngân hàng Câu hỏi
+      try {
+        const qRes = await fetch(`${scriptUrl}?action=getQuestions`);
+        if (qRes.ok) {
+          const qData = await qRes.json();
+          if (Array.isArray(qData) && qData.length > 1) {
+            const rows = qData.slice(1);
+            const importedQuestions: any[] = [];
+
+            for (const row of rows) {
+              if (!row || !row[2]) continue;
+              const id = String(row[0] || `q-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`);
+              const code = String(row[1] || '').trim();
+              const content = String(row[2]).trim();
+              const grade = parseInt(String(row[3] || '6').replace(/[^0-9]/g, ''), 10) || 6;
+              const topicId = String(row[4] || 'top-a').trim();
+              const difficulty = (['BIET', 'HIEU', 'VAN_DUNG', 'VAN_DUNG_CAO'].includes(String(row[5]))
+                ? String(row[5])
+                : 'BIET') as any;
+              const type = (['SINGLE_CHOICE', 'MULTIPLE_CHOICE', 'TRUE_FALSE', 'FILL_IN_BLANK', 'ESSAY'].includes(
+                String(row[6])
+              )
+                ? String(row[6])
+                : 'SINGLE_CHOICE') as any;
+              const rawOptions = String(row[7] || '');
+              const explanation = String(row[8] || '');
+              const imageDriveUrl = String(row[9] || '');
+              const directImageUrl = GoogleDriveService.getDriveDirectImageUrl(imageDriveUrl);
+              const author = String(row[10] || 'Giáo viên');
+              const createdAt = String(row[11] || new Date().toISOString().split('T')[0]);
+
+              const options: any[] = [];
+              if (rawOptions && rawOptions.includes('|')) {
+                const parts = rawOptions.split('|');
+                parts.forEach((p, idx) => {
+                  const trimmedP = p.trim();
+                  const isCorrect = trimmedP.startsWith('[x]');
+                  const text = trimmedP.replace(/^\[[ x]\]\s*/, '');
+                  options.push({
+                    id: `opt-${id}-${idx}`,
+                    text: text,
+                    isCorrect
+                  });
+                });
+              }
+
+              importedQuestions.push({
+                id,
+                code,
+                content,
+                grade,
+                topicId,
+                difficulty,
+                type,
+                options,
+                correctAnswer: type === 'FILL_IN_BLANK' ? rawOptions : undefined,
+                explanation,
+                imageDriveUrl: imageDriveUrl || undefined,
+                imageUrl: directImageUrl || undefined,
+                authorName: author,
+                createdAt
+              });
+            }
+
+            if (importedQuestions.length > 0) {
+              LMSStorageService.importQuestions(importedQuestions);
+              questionsCount = importedQuestions.length;
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('Lỗi tải questions từ Apps Script:', e);
+      }
+
+      notifyAutoSyncListeners({
+        status: 'synced',
+        lastSyncedTime: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
+        entity: 'Google Sheet (Apps Script)'
+      });
+
+      return {
+        users: usersCount,
+        classes: classesCount,
+        questions: questionsCount,
+        students: studentsCount,
+        success: true
+      };
+    } catch (err: any) {
+      notifyAutoSyncListeners({ status: 'error', errorMessage: err.message });
+      return {
+        users: usersCount,
+        classes: classesCount,
+        questions: questionsCount,
+        students: studentsCount,
+        success: false,
+        error: err.message
+      };
+    }
+  }
+
+  /**
+   * Đẩy dữ liệu mới (Tài khoản, Điểm số, Câu hỏi) lên Google Apps Script Web App
+   */
+  static async postToAppsScript(payload: any): Promise<boolean> {
+    const scriptUrl = getAppsScriptUrl();
+    if (!scriptUrl) return false;
+    try {
+      await fetch(scriptUrl, {
+        method: 'POST',
+        mode: 'no-cors',
+        headers: {
+          'Content-Type': 'text/plain;charset=utf-8'
+        },
+        body: JSON.stringify(payload)
+      });
+      return true;
+    } catch (e) {
+      console.warn('Lỗi gửi dữ liệu lên Apps Script:', e);
+      return false;
+    }
   }
 }
 

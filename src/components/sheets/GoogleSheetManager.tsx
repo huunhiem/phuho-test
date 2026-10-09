@@ -19,7 +19,8 @@ import {
   Lock,
   Eye,
   Check,
-  HardDrive
+  HardDrive,
+  Globe
 } from 'lucide-react';
 import {
   initGoogleAuth,
@@ -35,7 +36,9 @@ import {
   setAutoSyncEnabled,
   REQUIRED_SHEETS,
   clearGoogleToken,
-  isAuthErrorMessage
+  isAuthErrorMessage,
+  getAppsScriptUrl,
+  saveAppsScriptUrl
 } from '../../services/googleSheetsService';
 import { GoogleDriveService } from '../../services/googleDriveService';
 import { LMSStorageService } from '../../services/storage';
@@ -51,6 +54,12 @@ export const GoogleSheetManager: React.FC = () => {
   const [autoSync, setAutoSync] = useState(isAutoSyncEnabled());
   const [autoSyncState, setAutoSyncState] = useState<AutoSyncState>({ status: 'disconnected' });
   const [activeSubTab, setActiveSubTab] = useState<'manager' | 'preview' | 'vercel'>('manager');
+
+  // Apps Script Backend State
+  const [appsScriptUrlInput, setAppsScriptUrlInput] = useState(getAppsScriptUrl());
+  const [isTestingScript, setIsTestingScript] = useState(false);
+  const [scriptTestResult, setScriptTestResult] = useState<{ success?: boolean; message?: string } | null>(null);
+  const [isSyncingScript, setIsSyncingScript] = useState(false);
 
   // Preview data
   const [previewTab, setPreviewTab] = useState<string>('TaiKhoan');
@@ -200,6 +209,46 @@ export const GoogleSheetManager: React.FC = () => {
     }
   };
 
+  const handleSaveAppsScriptUrl = () => {
+    saveAppsScriptUrl(appsScriptUrlInput);
+    setScriptTestResult({ success: true, message: 'Đã lưu cấu hình Google Apps Script URL thành công!' });
+  };
+
+  const handleTestAppsScript = async () => {
+    setIsTestingScript(true);
+    setScriptTestResult(null);
+    saveAppsScriptUrl(appsScriptUrlInput);
+    try {
+      const res = await GoogleSheetsService.testAppsScriptConnection();
+      setScriptTestResult({ success: res.success, message: res.message });
+    } catch (e: any) {
+      setScriptTestResult({ success: false, message: e.message || 'Lỗi kiểm tra kết nối' });
+    } finally {
+      setIsTestingScript(false);
+    }
+  };
+
+  const handleSyncFromAppsScript = async () => {
+    setIsSyncingScript(true);
+    setScriptTestResult(null);
+    saveAppsScriptUrl(appsScriptUrlInput);
+    try {
+      const res = await GoogleSheetsService.syncFromAppsScript();
+      if (res.success) {
+        setScriptTestResult({
+          success: true,
+          message: `Đồng bộ thành công! Đã nạp ${res.users} tài khoản, ${res.classes} lớp học, ${res.questions} câu hỏi từ Google Sheet!`
+        });
+      } else {
+        setScriptTestResult({ success: false, message: res.error || 'Lỗi đồng bộ dữ liệu' });
+      }
+    } catch (e: any) {
+      setScriptTestResult({ success: false, message: e.message || 'Lỗi kết nối' });
+    } finally {
+      setIsSyncingScript(false);
+    }
+  };
+
   const appsScriptCode = `/**
  * Google Apps Script Web App - Cung cấp RESTful API cho CỔNG KIỂM TRA TRỰC TUYẾN trên Vercel
  * Hỗ trợ quản lý Tài khoản, Mật khẩu, Học sinh, Câu hỏi, Đề thi và Điểm số
@@ -256,6 +305,22 @@ function doGet(e) {
     var data = sheet.getDataRange().getValues();
     return jsonResponse(data);
   }
+
+  // 6. Lấy danh sách tên bài học
+  if (action === 'getLessons' || action === 'getTenBaiHoc') {
+    var sheet = ss.getSheetByName('TenBaiHoc');
+    if (!sheet) return jsonResponse({ error: 'Chưa có sheet TenBaiHoc' });
+    var data = sheet.getDataRange().getValues();
+    return jsonResponse(data);
+  }
+
+  // 7. Lấy danh sách đề thi
+  if (action === 'getTests' || action === 'getDeThi') {
+    var sheet = ss.getSheetByName('DeThi');
+    if (!sheet) return jsonResponse({ error: 'Chưa có sheet DeThi' });
+    var data = sheet.getDataRange().getValues();
+    return jsonResponse(data);
+  }
   
   return jsonResponse({ error: 'Action không hợp lệ: ' + action });
 }
@@ -299,6 +364,26 @@ function doPost(e) {
         payload.phone || '',
         payload.status || 'ACTIVE',
         new Date().toISOString().split('T')[0]
+      ]);
+      return jsonResponse({ success: true });
+    }
+
+    // Thêm câu hỏi mới
+    if (action === 'addQuestion') {
+      var sheet = ss.getSheetByName('CauHoi');
+      sheet.appendRow([
+        payload.id,
+        payload.code || '',
+        payload.content || '',
+        payload.grade || 6,
+        payload.topicId || '',
+        payload.difficulty || 'BIET',
+        payload.type || 'SINGLE_CHOICE',
+        payload.options || '',
+        payload.explanation || '',
+        payload.imageDriveUrl || '',
+        payload.authorName || '',
+        new Date().toISOString()
       ]);
       return jsonResponse({ success: true });
     }
@@ -419,6 +504,85 @@ function jsonResponse(data) {
 
       {activeSubTab === 'manager' && (
         <div className="space-y-6">
+          {/* Card: Google Apps Script Backend (Dành cho Vercel & GitHub) */}
+          <div className="bg-gradient-to-r from-indigo-50/70 via-sky-50/70 to-emerald-50/70 rounded-xl border border-indigo-200 p-6 shadow-xs space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                  <Globe className="w-5 h-5 text-indigo-600" />
+                  <span>Google Apps Script Backend (Vận hành Vercel & GitHub)</span>
+                </h2>
+                <p className="text-xs text-slate-600 mt-1">
+                  Kết nối trực tiếp tới Google Sheet của THCS Phú Hồ thông qua Web App URL. Hoạt động 100% không cần đăng nhập Google OAuth trên Vercel.
+                </p>
+              </div>
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 self-start sm:self-auto">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> Sẵn sàng cho Vercel
+              </span>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  URL Google Apps Script Web App (Biến môi trường Vercel: <code className="text-indigo-600 font-mono">VITE_APPS_SCRIPT_URL</code>)
+                </label>
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                  <input
+                    type="url"
+                    value={appsScriptUrlInput}
+                    onChange={(e) => setAppsScriptUrlInput(e.target.value)}
+                    placeholder="https://script.google.com/macros/s/.../exec"
+                    className="flex-1 px-3 py-2 rounded-lg border border-slate-300 text-xs text-slate-800 bg-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500 font-mono"
+                  />
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleSaveAppsScriptUrl}
+                      className="px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold transition-colors cursor-pointer"
+                    >
+                      Lưu URL
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleTestAppsScript}
+                      disabled={isTestingScript}
+                      className="px-3 py-2 rounded-lg bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${isTestingScript ? 'animate-spin' : ''}`} />
+                      <span>{isTestingScript ? 'Đang thử...' : 'Kiểm tra'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleSyncFromAppsScript}
+                      disabled={isSyncingScript}
+                      className="px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${isSyncingScript ? 'animate-spin' : ''}`} />
+                      <span>{isSyncingScript ? 'Đang đồng bộ...' : 'Đồng bộ Sheet'}</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {scriptTestResult && (
+                <div
+                  className={`p-3 rounded-lg text-xs flex items-center gap-2 ${
+                    scriptTestResult.success
+                      ? 'bg-emerald-100/80 border border-emerald-300 text-emerald-900'
+                      : 'bg-rose-100/80 border border-rose-300 text-rose-900'
+                  }`}
+                >
+                  {scriptTestResult.success ? (
+                    <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
+                  ) : (
+                    <AlertCircle className="w-4 h-4 text-rose-700 shrink-0" />
+                  )}
+                  <span>{scriptTestResult.message}</span>
+                </div>
+              )}
+            </div>
+          </div>
+
           {/* 1. Google Auth Card */}
           <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-xs space-y-4">
             <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
@@ -772,60 +936,165 @@ function jsonResponse(data) {
 
       {/* VERCEL SUB-TAB */}
       {activeSubTab === 'vercel' && (
-        <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-xs space-y-5">
-          <div>
-            <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
-              <Code2 className="w-5 h-5 text-indigo-600" />
-              <span>Hướng Dẫn Triển Khai Lên Vercel.com với Google Sheet REST API</span>
-            </h2>
-            <p className="text-xs text-slate-500 mt-1">
-              Sử dụng Google Apps Script làm Backend REST API miễn phí 100% để kết nối Vercel với Google Sheets
-            </p>
+        <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-xs space-y-6">
+          <div className="border-b border-slate-200 pb-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                  <Globe className="w-5 h-5 text-indigo-600" />
+                  <span>Hướng Dẫn Triển Khai Lên Vercel.com & Kết Nối Google Sheet, Google Drive</span>
+                </h2>
+                <p className="text-xs text-slate-500 mt-1">
+                  Kiến trúc Serverless tối ưu 100%: Miễn phí hosting trọn đời trên Vercel, lưu trữ dữ liệu vĩnh viễn trên Google Sheet & Google Drive của trường
+                </p>
+              </div>
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 self-start sm:self-auto">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" /> Đã tối ưu hóa cho Vercel
+              </span>
+            </div>
           </div>
 
-          <div className="space-y-4 text-xs">
-            <div className="p-4 bg-slate-900 text-slate-100 rounded-xl space-y-2">
-              <div className="flex items-center justify-between pb-2 border-b border-slate-800">
-                <span className="font-mono text-emerald-400 font-bold">Code.gs (Apps Script Backend)</span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    navigator.clipboard.writeText(appsScriptCode);
-                    setCopiedScript(true);
-                    setTimeout(() => setCopiedScript(false), 2000);
-                  }}
-                  className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-800 hover:bg-slate-700 rounded-md text-[11px] font-semibold text-white transition-colors cursor-pointer"
-                >
-                  {copiedScript ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                  <span>{copiedScript ? 'Đã sao chép!' : 'Sao chép mã'}</span>
-                </button>
+          {/* Sơ đồ hoạt động */}
+          <div className="p-4 rounded-xl bg-slate-900 text-slate-100 space-y-3">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-indigo-400">
+              Mô hình kết nối dữ liệu khi vận hành trên Vercel
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 text-xs">
+              <div className="p-3 rounded-lg bg-slate-800 border border-slate-700">
+                <div className="font-bold text-white mb-1 flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400"></span> 1. GitHub Repo
+                </div>
+                <div className="text-[11px] text-slate-400">Chứa mã nguồn React SPA Vite đã được cấu hình vercel.json rewrite</div>
               </div>
-
-              <pre className="font-mono text-[11px] text-slate-300 max-h-72 overflow-y-auto leading-relaxed">
-                {appsScriptCode}
-              </pre>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg space-y-1">
-                <div className="font-bold text-slate-800 text-xs">Bước 1: Dán vào Google Sheet</div>
-                <p className="text-[11px] text-slate-600">
-                  Mở Google Sheet -&gt; Tiện ích mở rộng (Extensions) -&gt; Apps Script -&gt; Dán đoạn mã trên.
-                </p>
+              <div className="p-3 rounded-lg bg-slate-800 border border-slate-700">
+                <div className="font-bold text-white mb-1 flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-sky-400"></span> 2. Vercel Hosting
+                </div>
+                <div className="text-[11px] text-slate-400">Máy chủ biên toàn cầu tốc độ cực nhanh, phát hành tên miền HTTPS miễn phí</div>
               </div>
-              <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg space-y-1">
-                <div className="font-bold text-slate-800 text-xs">Bước 2: Triển khai Web App</div>
-                <p className="text-[11px] text-slate-600">
-                  Chọn "Triển khai mới" -&gt; Loại "Ứng dụng web" -&gt; Ai có quyền truy cập: "Bất kỳ ai" (Anyone).
-                </p>
+              <div className="p-3 rounded-lg bg-slate-800 border border-slate-700">
+                <div className="font-bold text-white mb-1 flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-amber-400"></span> 3. Google Sheet
+                </div>
+                <div className="text-[11px] text-slate-400">Lưu trữ Tài khoản, Học sinh, Điểm số, Lớp học, Câu hỏi môn Tin học</div>
               </div>
-              <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg space-y-1">
-                <div className="font-bold text-slate-800 text-xs">Bước 3: Cấu hình trên Vercel</div>
-                <p className="text-[11px] text-slate-600">
-                  Thêm biến môi trường <code>VITE_APPS_SCRIPT_URL</code> trên Vercel với URL Web App nhận được.
-                </p>
+              <div className="p-3 rounded-lg bg-slate-800 border border-slate-700">
+                <div className="font-bold text-white mb-1 flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-rose-400"></span> 4. Google Drive
+                </div>
+                <div className="text-[11px] text-slate-400">Lưu file ảnh câu hỏi và backup toàn bộ ngân hàng đề thi môn Tin học</div>
               </div>
             </div>
+          </div>
+
+          {/* 4 Bước triển khai chi tiết */}
+          <div className="space-y-4">
+            <h3 className="text-sm font-bold text-slate-900">4 Bước Triển Khai Từ GitHub Lên Vercel</h3>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Bước 1 */}
+              <div className="p-4 rounded-xl border border-slate-200 bg-white space-y-2">
+                <div className="flex items-center gap-2">
+                  <span className="w-6 h-6 rounded-full bg-indigo-600 text-white font-bold text-xs flex items-center justify-center">1</span>
+                  <h4 className="font-bold text-slate-900 text-sm">Đẩy mã nguồn lên GitHub</h4>
+                </div>
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  Tải toàn bộ mã nguồn về hoặc đẩy vào kho lưu trữ (repository) GitHub của bạn:
+                </p>
+                <pre className="p-2.5 rounded-lg bg-slate-100 text-slate-800 font-mono text-[11px] overflow-x-auto">
+{`git init
+git add .
+git commit -m "Deploy Cổng Kiểm Tra Trực Tuyến THCS Phú Hồ"
+git branch -M main
+git remote add origin https://github.com/tai-khoan-cua-ban/ten-repo.git
+git push -u origin main`}
+                </pre>
+              </div>
+
+              {/* Bước 2 */}
+              <div className="p-4 rounded-xl border border-slate-200 bg-white space-y-2">
+                <div className="flex items-center gap-2">
+                  <span className="w-6 h-6 rounded-full bg-indigo-600 text-white font-bold text-xs flex items-center justify-center">2</span>
+                  <h4 className="font-bold text-slate-900 text-sm">Tạo dự án trên Vercel.com</h4>
+                </div>
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  Đăng nhập vào <a href="https://vercel.com" target="_blank" rel="noreferrer" className="text-indigo-600 font-semibold underline">vercel.com</a> (bằng tài khoản GitHub):
+                </p>
+                <ul className="text-xs text-slate-600 list-disc list-inside space-y-1">
+                  <li>Bấm nút <strong>"Add New..."</strong> -&gt; chọn <strong>"Project"</strong>.</li>
+                  <li>Tìm tên kho lưu trữ GitHub vừa tạo và bấm <strong>"Import"</strong>.</li>
+                  <li>Framework Preset: Vercel sẽ tự động nhận diện là <strong>Vite</strong>.</li>
+                  <li>Root Directory: để mặc định <code>./</code> (hoặc thư mục gốc).</li>
+                </ul>
+              </div>
+
+              {/* Bước 3 */}
+              <div className="p-4 rounded-xl border border-indigo-200 bg-indigo-50/50 space-y-2">
+                <div className="flex items-center gap-2">
+                  <span className="w-6 h-6 rounded-full bg-indigo-600 text-white font-bold text-xs flex items-center justify-center">3</span>
+                  <h4 className="font-bold text-indigo-950 text-sm">Cấu hình Biến môi trường trên Vercel</h4>
+                </div>
+                <p className="text-xs text-indigo-900 leading-relaxed">
+                  Tại mục <strong>"Environment Variables"</strong> của Vercel, nhập 2 biến sau:
+                </p>
+                <div className="space-y-2 font-mono text-[11px]">
+                  <div className="p-2 rounded bg-white border border-indigo-200">
+                    <div className="font-bold text-indigo-700">Tên biến: VITE_APPS_SCRIPT_URL</div>
+                    <div className="text-slate-600 text-[10px] truncate mt-0.5">
+                      Giá trị: {getAppsScriptUrl()}
+                    </div>
+                  </div>
+                  <div className="p-2 rounded bg-white border border-indigo-200">
+                    <div className="font-bold text-indigo-700">Tên biến: GEMINI_API_KEY (Tùy chọn)</div>
+                    <div className="text-slate-500 text-[10px] mt-0.5">
+                      Khóa API Gemini nếu muốn dùng AI sinh câu hỏi tự động
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Bước 4 */}
+              <div className="p-4 rounded-xl border border-emerald-200 bg-emerald-50/50 space-y-2">
+                <div className="flex items-center gap-2">
+                  <span className="w-6 h-6 rounded-full bg-emerald-600 text-white font-bold text-xs flex items-center justify-center">4</span>
+                  <h4 className="font-bold text-emerald-950 text-sm">Bấm Deploy & Sử Dụng</h4>
+                </div>
+                <p className="text-xs text-emerald-900 leading-relaxed">
+                  Nhấn nút <strong>"Deploy"</strong>. Vercel sẽ tự động build ứng dụng trong vòng chưa đầy 1 phút.
+                </p>
+                <ul className="text-xs text-emerald-900 list-disc list-inside space-y-1">
+                  <li>Bạn nhận được link truy cập công khai có dạng <code>https://ten-du-an.vercel.app</code>.</li>
+                  <li>Mọi tài khoản giáo viên, học sinh trong Google Sheet có thể đăng nhập ngay!</li>
+                  <li>Điểm số học sinh nộp bài thi sẽ tự động ghi thẳng vào Google Sheet!</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          {/* Mã nguồn Apps Script */}
+          <div className="p-4 bg-slate-900 text-slate-100 rounded-xl space-y-3">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+              <div>
+                <span className="font-mono text-emerald-400 font-bold text-xs">Mã nguồn Google Apps Script (Code.gs)</span>
+                <span className="text-[11px] text-slate-400 ml-2">Đã tối ưu hóa đầy đủ cho 7 Sheet</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard.writeText(appsScriptCode);
+                  setCopiedScript(true);
+                  setTimeout(() => setCopiedScript(false), 2000);
+                }}
+                className="inline-flex items-center gap-1.5 px-3 py-1 bg-slate-800 hover:bg-slate-700 rounded-md text-[11px] font-semibold text-white transition-colors cursor-pointer"
+              >
+                {copiedScript ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                <span>{copiedScript ? 'Đã sao chép!' : 'Sao chép mã'}</span>
+              </button>
+            </div>
+
+            <pre className="font-mono text-[11px] text-slate-300 max-h-60 overflow-y-auto leading-relaxed">
+              {appsScriptCode}
+            </pre>
           </div>
         </div>
       )}

@@ -16,9 +16,9 @@ export const INITIAL_SCHOOL: School = {
   id: 'school-phuho-01',
   name: 'Trường THCS Phú Hồ',
   code: 'THCS-PHUHO',
-  province: 'Thừa Thiên Huế',
-  district: 'Huyện Phú Vang',
-  address: 'Xã Phú Hồ, Huyện Phú Vang, Tỉnh Thừa Thiên Huế',
+  province: 'Thành phố Huế',
+  district: 'Xã Phú Hồ',
+  address: 'Xã Phú Hồ, thành phố Huế',
   principalName: 'Trần Văn Khoa',
   academicYear: '2025-2026'
 };
