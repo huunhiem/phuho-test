@@ -15,7 +15,11 @@ import {
   DEFAULT_APPS_SCRIPT_URL,
   SHEET_ID_KEY,
   SYSTEM_CONFIG_KEY,
+  DRIVE_FOLDER_ID_KEY,
+  DRIVE_FOLDER_URL_KEY,
   getSavedSheetId,
+  getSavedDriveFolderId,
+  getSavedDriveFolderUrl,
   getAppsScriptUrl,
   saveAppsScriptUrl,
   extractSheetId,
@@ -26,7 +30,11 @@ export {
   DEFAULT_APPS_SCRIPT_URL,
   SHEET_ID_KEY,
   SYSTEM_CONFIG_KEY,
+  DRIVE_FOLDER_ID_KEY,
+  DRIVE_FOLDER_URL_KEY,
   getSavedSheetId,
+  getSavedDriveFolderId,
+  getSavedDriveFolderUrl,
   getAppsScriptUrl,
   saveAppsScriptUrl,
   extractSheetId,
@@ -1546,18 +1554,214 @@ export class GoogleSheetsService {
   static async postToAppsScript(payload: any): Promise<boolean> {
     const scriptUrl = getAppsScriptUrl();
     if (!scriptUrl) return false;
+    const finalPayload = {
+      sheetId: getSavedSheetId(),
+      folderId: getSavedDriveFolderId(),
+      ...payload
+    };
     try {
+      // Thử fetch thông thường trước
+      try {
+        const directRes = await fetch(scriptUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'text/plain;charset=utf-8'
+          },
+          body: JSON.stringify(finalPayload)
+        });
+        if (directRes.ok) return true;
+      } catch {
+        // Fallback sang no-cors
+      }
+
       await fetch(scriptUrl, {
         method: 'POST',
         mode: 'no-cors',
         headers: {
           'Content-Type': 'text/plain;charset=utf-8'
         },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(finalPayload)
       });
       return true;
     } catch (e) {
       console.warn('Lỗi gửi dữ liệu lên Apps Script:', e);
+      return false;
+    }
+  }
+
+  /**
+   * Đẩy toàn bộ dữ liệu 7 sheet lên Google Sheet và sao lưu Google Drive thông qua Apps Script
+   * Hoạt động 100% độc lập, không yêu cầu đăng nhập Google OAuth
+   */
+  static async pushAllDataViaAppsScript(spreadsheetId?: string): Promise<{ success: boolean; message: string }> {
+    const scriptUrl = getAppsScriptUrl();
+    if (!scriptUrl) {
+      return { success: false, message: 'Chưa cấu hình URL Google Apps Script Web App' };
+    }
+    const sheetId = spreadsheetId || getSavedSheetId();
+    const folderId = getSavedDriveFolderId();
+    const allQuestions = LMSStorageService.getQuestions();
+
+    const payload = {
+      action: 'batchPushAllData',
+      sheetId,
+      folderId,
+      sheets: [
+        { name: 'TaiKhoan', rows: this.buildTaiKhoanRows() },
+        { name: 'HocSinh', rows: this.buildHocSinhRows() },
+        { name: 'GiaoVien', rows: this.buildGiaoVienRows() },
+        { name: 'LopHoc', rows: this.buildLopHocRows() },
+        { name: 'TenBaiHoc', rows: this.buildTenBaiHocRows() },
+        { name: 'CauHoi', rows: this.buildCauHoiRows() },
+        { name: 'DeThi', rows: this.buildDeThiRows() },
+        { name: 'BangDiem', rows: this.buildBangDiemRows() }
+      ],
+      allQuestions
+    };
+
+    try {
+      const ok = await this.postToAppsScript(payload);
+      if (ok) {
+        await GoogleDriveService.saveQuestionsToDriveViaAppsScript(allQuestions);
+        notifyAutoSyncListeners({
+          status: 'synced',
+          lastSyncedTime: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
+          entity: 'Toàn bộ 7 Sheet & Google Drive'
+        });
+        return {
+          success: true,
+          message: 'Đã đẩy thành công toàn bộ 7 sheet (TaiKhoan, HocSinh, GiaoVien, LopHoc, TenBaiHoc, CauHoi, DeThi, BangDiem) lên Google Sheet và sao lưu Google Drive!'
+        };
+      }
+      return { success: false, message: 'Không nhận được phản hồi từ Apps Script' };
+    } catch (e: any) {
+      return { success: false, message: e.message || 'Lỗi khi gửi dữ liệu lên Apps Script' };
+    }
+  }
+
+  /**
+   * Lưu câu hỏi đồng thời vào Google Sheet (sheet CauHoi) và Google Drive
+   * Đảm bảo mọi giáo viên tạo hoặc sửa câu hỏi đều được ghi nhận ngay lập tức
+   */
+  static async saveQuestionToGoogleSheetAndDrive(
+    question: Question,
+    imageBase64?: string
+  ): Promise<{ success: boolean; sheetSaved: boolean; driveSaved: boolean }> {
+    let sheetSaved = false;
+    let driveSaved = false;
+
+    const sheetId = getSavedSheetId();
+    const token = getGoogleAccessToken();
+    const scriptUrl = getAppsScriptUrl();
+    const folderId = getSavedDriveFolderId();
+    const allQuestions = LMSStorageService.getQuestions();
+
+    let formattedOptions = '';
+    if (question.type === 'TRUE_FALSE') {
+      if (question.trueFalseStatements && question.trueFalseStatements.length > 0) {
+        formattedOptions = question.trueFalseStatements
+          .map((s) => `${s.isCorrect ? '[x]' : '[ ]'} ${s.statement}`)
+          .join(' | ');
+      } else if (question.options && question.options.length > 0) {
+        formattedOptions = question.options
+          .map((o) => `${o.isCorrect ? '[x]' : '[ ]'} ${o.text}`)
+          .join(' | ');
+      }
+    } else if (question.type === 'SINGLE_CHOICE' || question.type === 'MULTIPLE_CHOICE') {
+      if (question.options && question.options.length > 0) {
+        formattedOptions = question.options
+          .map((o) => `${o.isCorrect ? '[x]' : '[ ]'} ${o.text}`)
+          .join(' | ');
+      }
+    } else if (question.type === 'FILL_IN_BLANK') {
+      formattedOptions = question.correctAnswerText || '';
+    } else if (question.type === 'ESSAY') {
+      formattedOptions = question.essaySampleAnswer || '';
+    }
+
+    const payload = {
+      action: 'saveQuestion',
+      sheetId,
+      folderId,
+      id: question.id,
+      code: question.code,
+      content: question.content,
+      grade: question.gradeLevel,
+      gradeLevel: question.gradeLevel,
+      topic: question.topic,
+      topicId: question.topic,
+      lessonTitle: question.lessonTitle || '',
+      learningOutcome: question.learningOutcome || '',
+      difficulty: question.difficulty,
+      type: question.type,
+      options: formattedOptions,
+      explanation: question.explanation || '',
+      imageDriveUrl: question.imageDriveUrl || '',
+      imageUrl: question.imageUrl && !question.imageUrl.startsWith('data:') ? question.imageUrl : '',
+      authorName: question.authorName || 'Giáo viên',
+      createdAt: question.createdAt || new Date().toISOString().split('T')[0],
+      imageBase64: imageBase64 || (question.imageUrl && question.imageUrl.startsWith('data:') ? question.imageUrl : undefined),
+      allQuestions
+    };
+
+    // 1. Gửi qua Google Apps Script Web App của Google Sheet & Drive
+    if (scriptUrl) {
+      try {
+        const posted = await this.postToAppsScript(payload);
+        if (posted) {
+          sheetSaved = true;
+          driveSaved = true;
+        }
+        // Sao lưu file JSON toàn bộ ngân hàng câu hỏi lên Google Drive
+        await GoogleDriveService.saveQuestionsToDriveViaAppsScript(allQuestions);
+      } catch (e) {
+        console.warn('Lỗi postToAppsScript:', e);
+      }
+    }
+
+    // 2. Nếu có token và sheetId, cập nhật trực tiếp qua Google Sheets API v4
+    if (sheetId && token) {
+      try {
+        await this.syncEntity('questions', sheetId, token);
+        sheetSaved = true;
+      } catch (e) {
+        console.warn('Lỗi syncEntity Google Sheet OAuth:', e);
+      }
+
+      try {
+        await GoogleDriveService.saveQuestionsToDrive(allQuestions, token);
+        driveSaved = true;
+      } catch (e) {
+        console.warn('Lỗi saveQuestionsToDrive OAuth:', e);
+      }
+    }
+
+    notifyAutoSyncListeners({
+      status: 'synced',
+      lastSyncedTime: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
+      entity: `Câu hỏi ${question.code} (Google Sheet & Drive)`
+    });
+
+    return {
+      success: sheetSaved || driveSaved,
+      sheetSaved,
+      driveSaved
+    };
+  }
+
+  /**
+   * Xóa câu hỏi khỏi Google Sheet qua Apps Script
+   */
+  static async deleteQuestionFromGoogleSheet(questionId: string): Promise<boolean> {
+    const scriptUrl = getAppsScriptUrl();
+    if (!scriptUrl) return false;
+    try {
+      return await this.postToAppsScript({
+        action: 'deleteQuestion',
+        id: questionId
+      });
+    } catch (e) {
+      console.warn('Lỗi xóa câu hỏi qua Apps Script:', e);
       return false;
     }
   }

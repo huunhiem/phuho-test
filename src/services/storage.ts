@@ -39,6 +39,7 @@ const STORAGE_KEYS = {
   TOPICS: 'phuho_lms_topics',
   LESSONS: 'phuho_lms_lessons',
   QUESTIONS: 'phuho_lms_questions',
+  DELETED_QUESTION_IDS: 'phuho_lms_deleted_question_ids',
   TESTS: 'phuho_lms_tests',
   ASSIGNMENTS: 'phuho_lms_assignments',
   SUBMISSIONS: 'phuho_lms_submissions',
@@ -311,11 +312,33 @@ export class LMSStorageService {
 
   // Questions
   static getQuestions(): Question[] {
-    const raw = getStored<Question[]>(STORAGE_KEYS.QUESTIONS, INITIAL_QUESTIONS);
+    const deletedIds = new Set(getStored<string[]>(STORAGE_KEYS.DELETED_QUESTION_IDS, []));
+    const stored = getStored<Question[]>(STORAGE_KEYS.QUESTIONS, []);
     const topics = this.getTopics();
 
+    // Map chứa toàn bộ câu hỏi hệ thống + câu hỏi tạo mới/đồng bộ
+    const qMap = new Map<string, Question>();
+
+    // 1. Khởi tạo bằng toàn bộ 20 câu hỏi chuẩn GDPT 2018 của hệ thống nếu chưa bị xóa
+    INITIAL_QUESTIONS.forEach((q) => {
+      if (!deletedIds.has(q.id)) {
+        qMap.set(q.id, { ...q });
+      }
+    });
+
+    // 2. Nạp đè/bổ sung từ kho lưu trữ (chứa các chỉnh sửa của GV và câu hỏi mới thêm)
+    if (Array.isArray(stored)) {
+      stored.forEach((q) => {
+        if (q && q.id && !deletedIds.has(q.id)) {
+          qMap.set(q.id, q);
+        }
+      });
+    }
+
+    const rawList = Array.from(qMap.values());
+
     // Chuẩn hóa và khắc phục dữ liệu câu hỏi nếu có trường bị thiếu từ Google Sheet
-    const normalized: Question[] = (raw && raw.length > 0 ? raw : INITIAL_QUESTIONS).map((q, idx) => {
+    const normalized: Question[] = rawList.map((q, idx) => {
       const gradeLevel = Number(q.gradeLevel || (q as any).grade) || 6;
       let topic = q.topic || (q as any).topicName;
       if (!topic && (q as any).topicId) {
@@ -361,25 +384,54 @@ export class LMSStorageService {
   }
 
   static addQuestion(q: Question): void {
-    const list = this.getQuestions();
-    setStored(STORAGE_KEYS.QUESTIONS, [q, ...list]);
+    // Nếu ID này từng nằm trong danh sách đã xóa, bỏ khỏi danh sách xóa
+    const deletedIds = getStored<string[]>(STORAGE_KEYS.DELETED_QUESTION_IDS, []);
+    if (deletedIds.includes(q.id)) {
+      setStored(
+        STORAGE_KEYS.DELETED_QUESTION_IDS,
+        deletedIds.filter((id) => id !== q.id)
+      );
+    }
+
+    const current = this.getQuestions();
+    const updated = [q, ...current.filter((item) => item.id !== q.id)];
+    setStored(STORAGE_KEYS.QUESTIONS, updated);
     notifyChange('questions');
   }
 
   static bulkAddQuestions(questions: Question[]): void {
-    const list = this.getQuestions();
-    setStored(STORAGE_KEYS.QUESTIONS, [...questions, ...list]);
+    const current = this.getQuestions();
+    const map = new Map<string, Question>();
+    questions.forEach((q) => map.set(q.id, q));
+    current.forEach((q) => {
+      if (!map.has(q.id)) {
+        map.set(q.id, q);
+      }
+    });
+    setStored(STORAGE_KEYS.QUESTIONS, Array.from(map.values()));
     notifyChange('questions');
   }
 
   static updateQuestion(q: Question): void {
-    const list = this.getQuestions().map((item) => (item.id === q.id ? q : item));
-    setStored(STORAGE_KEYS.QUESTIONS, list);
+    const current = this.getQuestions();
+    const exists = current.some((item) => item.id === q.id);
+    let updated: Question[];
+    if (exists) {
+      updated = current.map((item) => (item.id === q.id ? q : item));
+    } else {
+      updated = [q, ...current];
+    }
+    setStored(STORAGE_KEYS.QUESTIONS, updated);
     notifyChange('questions');
   }
 
   static deleteQuestion(id: string): void {
-    const list = this.getQuestions().filter((item) => item.id !== id);
+    const deletedIds = getStored<string[]>(STORAGE_KEYS.DELETED_QUESTION_IDS, []);
+    if (!deletedIds.includes(id)) {
+      setStored(STORAGE_KEYS.DELETED_QUESTION_IDS, [...deletedIds, id]);
+    }
+    const current = this.getQuestions();
+    const list = current.filter((item) => item.id !== id);
     setStored(STORAGE_KEYS.QUESTIONS, list);
     notifyChange('questions');
   }
@@ -389,11 +441,21 @@ export class LMSStorageService {
     const existing = this.getQuestions();
     const map = new Map<string, Question>();
     existing.forEach((q) => map.set(q.id, q));
+
     newQuestions.forEach((q) => {
       if (q && q.id) {
+        // Tìm xem có câu trùng mã code không để cập nhật
+        if (q.code) {
+          const matchedByCode = Array.from(map.values()).find((item) => item.code === q.code);
+          if (matchedByCode) {
+            map.set(matchedByCode.id, { ...matchedByCode, ...q, id: matchedByCode.id });
+            return;
+          }
+        }
         map.set(q.id, q);
       }
     });
+
     const merged = Array.from(map.values());
     setStored(STORAGE_KEYS.QUESTIONS, merged);
     notifyChange('questions');

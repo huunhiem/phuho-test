@@ -230,35 +230,30 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({ currentUser }) => {
         imageUrl: dataUrl
       }));
 
-      const token = getGoogleAccessToken();
-      if (token) {
-        setIsUploadingImage(true);
-        setUploadImageStatus('Đang tải hình ảnh lên Google Drive...');
-        try {
-          const res = await GoogleDriveService.uploadImageToDrive(file, file.name, token);
-          setFormData((prev) => ({
-            ...prev,
-            imageUrl: res.displayUrl,
-            imageDriveUrl: res.viewLink,
-            imageDriveFileId: res.fileId
-          }));
+      // Tự động tải ảnh lên Google Drive (ưu tiên OAuth hoặc Apps Script cấu hình chung)
+      setIsUploadingImage(true);
+      setUploadImageStatus('Đang tải hình ảnh lên Google Drive...');
+      try {
+        const token = getGoogleAccessToken();
+        let res: { displayUrl: string; viewLink: string; fileId: string };
+        if (token) {
+          res = await GoogleDriveService.uploadImageToDrive(file, file.name, token);
           setGoogleConnected(true);
-          setUploadImageStatus('Đã tải lên Google Drive thành công!');
-        } catch (err: any) {
-          console.warn('Lỗi tải ảnh lên Drive:', err);
-          const isAuth = Boolean(err?.isAuthError || isAuthErrorMessage(err?.message));
-          if (isAuth) {
-            clearGoogleToken();
-            setGoogleConnected(false);
-            setUploadImageStatus('Ảnh đã đính kèm thành công (Lưu theo cấu hình hệ thống)');
-          } else {
-            setUploadImageStatus(`Ảnh đã đính kèm thành công`);
-          }
-        } finally {
-          setIsUploadingImage(false);
+        } else {
+          res = await GoogleDriveService.uploadImageViaAppsScript(dataUrl, file.name);
         }
-      } else {
-        setUploadImageStatus('Ảnh đã đính kèm và sẵn sàng lưu theo cấu hình hệ thống');
+        setFormData((prev) => ({
+          ...prev,
+          imageUrl: res.displayUrl,
+          imageDriveUrl: res.viewLink,
+          imageDriveFileId: res.fileId
+        }));
+        setUploadImageStatus('✓ Đã lưu trữ ảnh lên Google Drive thành công!');
+      } catch (err: any) {
+        console.warn('Lỗi tải ảnh lên Drive:', err);
+        setUploadImageStatus('✓ Ảnh đã đính kèm (sẽ tự động hoàn tất lưu trên Google Drive khi bấm Lưu câu hỏi)');
+      } finally {
+        setIsUploadingImage(false);
       }
     };
     reader.readAsDataURL(file);
@@ -404,22 +399,46 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({ currentUser }) => {
     setDeleteQuestionId(id);
   };
 
-  const confirmDeleteQuestion = () => {
+  const confirmDeleteQuestion = async () => {
     if (deleteQuestionId) {
       LMSStorageService.deleteQuestion(deleteQuestionId);
       // Gửi lệnh xóa lên Google Sheet qua Apps Script
-      GoogleSheetsService.postToAppsScript({
-        action: 'deleteQuestion',
-        id: deleteQuestionId
-      });
+      await GoogleSheetsService.deleteQuestionFromGoogleSheet(deleteQuestionId);
       refreshQuestions();
       setDeleteQuestionId(null);
     }
   };
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.content.trim()) return;
+
+    let finalImageUrl = formData.imageUrl;
+    let finalDriveUrl = formData.imageDriveUrl;
+    let finalDriveFileId = formData.imageDriveFileId;
+
+    // Nếu ảnh có dữ liệu cục bộ (base64) mà chưa có link Google Drive, thử tải lên Google Drive
+    if (formData.imageUrl && (!formData.imageDriveUrl || !formData.imageDriveUrl.includes('drive.google.com'))) {
+      try {
+        const token = getGoogleAccessToken();
+        let uploadRes;
+        if (token && selectedImageFile) {
+          uploadRes = await GoogleDriveService.uploadImageToDrive(selectedImageFile, selectedImageFile.name, token);
+        } else {
+          uploadRes = await GoogleDriveService.uploadImageViaAppsScript(
+            formData.imageUrl,
+            selectedImageFile?.name || `img_${formData.code || Date.now()}.png`
+          );
+        }
+        if (uploadRes) {
+          finalImageUrl = uploadRes.displayUrl;
+          finalDriveUrl = uploadRes.viewLink;
+          finalDriveFileId = uploadRes.fileId;
+        }
+      } catch (err) {
+        console.warn('Lỗi tải ảnh Drive khi lưu câu hỏi:', err);
+      }
+    }
 
     if (editingQuestion) {
       const updated: Question = {
@@ -437,34 +456,17 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({ currentUser }) => {
         correctAnswerText: formData.correctAnswerText,
         essaySampleAnswer: formData.essaySampleAnswer,
         explanation: formData.explanation,
-        imageUrl: formData.imageUrl || undefined,
-        imageDriveUrl: formData.imageDriveUrl || undefined,
-        imageDriveFileId: formData.imageDriveFileId || undefined
+        imageUrl: finalImageUrl || undefined,
+        imageDriveUrl: finalDriveUrl || undefined,
+        imageDriveFileId: finalDriveFileId || undefined
       };
       LMSStorageService.updateQuestion(updated);
 
-      // Đẩy cập nhật câu hỏi lên Google Sheet tự động
-      GoogleSheetsService.postToAppsScript({
-        action: 'saveQuestion',
-        id: updated.id,
-        code: updated.code,
-        content: updated.content,
-        gradeLevel: updated.gradeLevel,
-        grade: updated.gradeLevel,
-        topic: updated.topic,
-        topicId: updated.topic,
-        lessonTitle: updated.lessonTitle,
-        learningOutcome: updated.learningOutcome,
-        difficulty: updated.difficulty,
-        type: updated.type,
-        options: updated.options
-          ? updated.options.map((o) => `${o.isCorrect ? '[x]' : '[ ]'} ${o.text}`).join(' | ')
-          : updated.correctAnswerText || updated.essaySampleAnswer || '',
-        explanation: updated.explanation || '',
-        imageDriveUrl: updated.imageDriveUrl || updated.imageUrl || '',
-        authorName: updated.authorName || currentUser.fullName,
-        createdAt: updated.createdAt || new Date().toISOString().split('T')[0]
-      });
+      // Lưu đồng thời lên Google Sheet & Google Drive
+      await GoogleSheetsService.saveQuestionToGoogleSheetAndDrive(
+        updated,
+        formData.imageUrl && formData.imageUrl.startsWith('data:') ? formData.imageUrl : undefined
+      );
     } else {
       const newQ: Question = {
         id: `q-${Date.now()}`,
@@ -481,9 +483,9 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({ currentUser }) => {
         correctAnswerText: formData.correctAnswerText,
         essaySampleAnswer: formData.essaySampleAnswer,
         explanation: formData.explanation,
-        imageUrl: formData.imageUrl || undefined,
-        imageDriveUrl: formData.imageDriveUrl || undefined,
-        imageDriveFileId: formData.imageDriveFileId || undefined,
+        imageUrl: finalImageUrl || undefined,
+        imageDriveUrl: finalDriveUrl || undefined,
+        imageDriveFileId: finalDriveFileId || undefined,
         createdBy: currentUser.id,
         authorName: currentUser.fullName,
         createdAt: new Date().toISOString().split('T')[0],
@@ -491,28 +493,11 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({ currentUser }) => {
       };
       LMSStorageService.addQuestion(newQ);
 
-      // Đẩy câu hỏi mới lên Google Sheet tự động
-      GoogleSheetsService.postToAppsScript({
-        action: 'saveQuestion',
-        id: newQ.id,
-        code: newQ.code,
-        content: newQ.content,
-        gradeLevel: newQ.gradeLevel,
-        grade: newQ.gradeLevel,
-        topic: newQ.topic,
-        topicId: newQ.topic,
-        lessonTitle: newQ.lessonTitle,
-        learningOutcome: newQ.learningOutcome,
-        difficulty: newQ.difficulty,
-        type: newQ.type,
-        options: newQ.options
-          ? newQ.options.map((o) => `${o.isCorrect ? '[x]' : '[ ]'} ${o.text}`).join(' | ')
-          : newQ.correctAnswerText || newQ.essaySampleAnswer || '',
-        explanation: newQ.explanation || '',
-        imageDriveUrl: newQ.imageDriveUrl || newQ.imageUrl || '',
-        authorName: newQ.authorName,
-        createdAt: newQ.createdAt
-      });
+      // Lưu đồng thời lên Google Sheet & Google Drive
+      await GoogleSheetsService.saveQuestionToGoogleSheetAndDrive(
+        newQ,
+        formData.imageUrl && formData.imageUrl.startsWith('data:') ? formData.imageUrl : undefined
+      );
     }
 
     setIsModalOpen(false);

@@ -172,16 +172,27 @@ export const GoogleSheetManager: React.FC<GoogleSheetManagerProps> = ({ currentU
   };
 
   const handlePushToSheet = async () => {
-    if (!accessToken || !sheetId.trim()) {
-      alert('Vui lòng kết nối Google và nhập Spreadsheet ID.');
+    const targetSheetId = sheetId.trim() || systemConfig.sheetId;
+    if (!targetSheetId && !appsScriptUrlInput) {
+      alert('Vui lòng nhập Google Spreadsheet ID hoặc URL Google Apps Script.');
       return;
     }
 
     setIsSyncing(true);
-    setSyncStatus('Đang đẩy toàn bộ dữ liệu LMS (Tài khoản, Học sinh, Giáo viên, Lớp học, Câu hỏi, Đề thi, Điểm) lên Google Sheets...');
+    setSyncStatus('Đang đẩy toàn bộ 7 sheet (TaiKhoan, HocSinh, GiaoVien, LopHoc, TenBaiHoc, CauHoi, DeThi, BangDiem) lên Google Sheet & Drive...');
     try {
-      await GoogleSheetsService.pushAllDataToSheet(sheetId, accessToken);
-      setSyncStatus('Đã đồng bộ toàn bộ 7 sheet lên Google Sheet thành công!');
+      if (accessToken && targetSheetId) {
+        await GoogleSheetsService.pushAllDataToSheet(targetSheetId, accessToken);
+        await GoogleDriveService.saveQuestionsToDrive(LMSStorageService.getQuestions(), accessToken);
+        setSyncStatus('✓ Đã đồng bộ thành công toàn bộ 7 sheet lên Google Sheet và sao lưu Google Drive qua Google OAuth!');
+      } else {
+        const res = await GoogleSheetsService.pushAllDataViaAppsScript(targetSheetId);
+        if (res.success) {
+          setSyncStatus(`✓ ${res.message}`);
+        } else {
+          setSyncStatus(`Lỗi đồng bộ: ${res.message}`);
+        }
+      }
     } catch (e: any) {
       setSyncStatus(`Lỗi đồng bộ: ${e.message || String(e)}`);
     } finally {
@@ -190,16 +201,26 @@ export const GoogleSheetManager: React.FC<GoogleSheetManagerProps> = ({ currentU
   };
 
   const handlePullAccountsFromSheet = async () => {
-    if (!accessToken || !sheetId.trim()) {
-      alert('Vui lòng kết nối Google và nhập Spreadsheet ID.');
+    const targetSheetId = sheetId.trim() || systemConfig.sheetId;
+    if (!targetSheetId && !appsScriptUrlInput) {
+      alert('Vui lòng nhập Google Spreadsheet ID hoặc URL Google Apps Script.');
       return;
     }
 
     setIsSyncing(true);
-    setSyncStatus('Đang đọc danh sách tài khoản, username & mật khẩu từ sheet TaiKhoan...');
+    setSyncStatus('Đang đọc danh sách dữ liệu tài khoản từ Google Sheet...');
     try {
-      const count = await GoogleSheetsService.pullAccountsFromSheet(sheetId, accessToken);
-      setSyncStatus(`Đã tải & cập nhật thành công ${count} tài khoản và mật khẩu từ Google Sheet vào LMS!`);
+      if (accessToken && targetSheetId) {
+        const count = await GoogleSheetsService.pullAccountsFromSheet(targetSheetId, accessToken);
+        setSyncStatus(`✓ Đã tải & cập nhật thành công ${count} tài khoản từ Google Sheet vào LMS!`);
+      } else {
+        const res = await GoogleSheetsService.syncFromAppsScript();
+        if (res.success) {
+          setSyncStatus(`✓ Đã nạp thành công ${res.users} tài khoản, ${res.classes} lớp học, ${res.questions} câu hỏi từ Google Sheet!`);
+        } else {
+          setSyncStatus(`Lỗi tải dữ liệu: ${res.error || 'Không nhận được dữ liệu'}`);
+        }
+      }
     } catch (e: any) {
       setSyncStatus(`Lỗi tải dữ liệu tài khoản: ${e.message || String(e)}`);
     } finally {
@@ -307,7 +328,7 @@ export const GoogleSheetManager: React.FC<GoogleSheetManagerProps> = ({ currentU
 
   const appsScriptCode = `/**
  * Google Apps Script Web App - Cung cấp RESTful API cho CỔNG KIỂM TRA TRỰC TUYẾN trên Vercel
- * Hỗ trợ quản lý Tài khoản, Mật khẩu, Học sinh, Câu hỏi, Đề thi và Điểm số
+ * Hỗ trợ quản lý Tài khoản, Mật khẩu, Học sinh, Câu hỏi, Đề thi, Lưu trữ Google Drive và Điểm số
  *
  * Hướng dẫn triển khai:
  * 1. Trên Google Sheet, nhấn Tiện ích mở rộng (Extensions) -> Apps Script
@@ -315,12 +336,43 @@ export const GoogleSheetManager: React.FC<GoogleSheetManagerProps> = ({ currentU
  * 3. Nhấn Triển khai (Deploy) -> Tùy chọn triển khai mới (New deployment)
  * 4. Chọn loại: Ứng dụng web (Web App)
  * 5. Ai có quyền truy cập (Who has access): Bất kỳ ai (Anyone)
- * 6. Sao chép Web App URL và điền vào biến môi trường VITE_APPS_SCRIPT_URL trên Vercel.
+ * 6. Sao chép Web App URL và điền vào ô "Google Apps Script URL" trong LMS hoặc biến môi trường VITE_APPS_SCRIPT_URL.
  */
 
+function getTargetSpreadsheet(sheetId) {
+  if (sheetId && String(sheetId).trim()) {
+    try {
+      return SpreadsheetApp.openById(String(sheetId).trim());
+    } catch(err) {}
+  }
+  try {
+    return SpreadsheetApp.getActiveSpreadsheet();
+  } catch(err) {}
+  return null;
+}
+
+function getTargetFolder(folderId) {
+  if (folderId && String(folderId).trim()) {
+    try {
+      return DriveApp.getFolderById(String(folderId).trim());
+    } catch(err) {}
+  }
+  return DriveApp.getRootFolder();
+}
+
 function doGet(e) {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheetId = (e && e.parameter && e.parameter.sheetId);
+  var ss = getTargetSpreadsheet(sheetId);
   var action = (e && e.parameter && e.parameter.action) || 'getAccounts';
+
+  if (!ss) {
+    return jsonResponse({ error: 'Không tìm thấy Google Spreadsheet. Vui lòng truyền sheetId hoặc mở đúng bảng tính.' });
+  }
+
+  // 0. Kiểm tra kết nối
+  if (action === 'ping' || action === 'testConnection') {
+    return jsonResponse({ success: true, message: 'Google Apps Script hoạt động tốt!', spreadsheetName: ss.getName() });
+  }
   
   // 1. Lấy toàn bộ tài khoản & mật khẩu
   if (action === 'getAccounts' || action === 'getUsers') {
@@ -341,7 +393,17 @@ function doGet(e) {
   // 3. Lấy ngân hàng câu hỏi
   if (action === 'getQuestions') {
     var sheet = ss.getSheetByName('CauHoi');
-    if (!sheet) return jsonResponse({ error: 'Chưa có sheet CauHoi' });
+    if (!sheet) {
+      // Tự động khởi tạo sheet CauHoi nếu chưa có
+      sheet = ss.insertSheet('CauHoi');
+      sheet.appendRow([
+        'ID', 'Mã câu', 'Nội dung', 'Khối', 'Chủ đề',
+        'Tên bài học', 'Yêu cầu cần đạt', 'Mức độ', 'Dạng câu',
+        'Phương án / Đáp án đúng', 'Giải thích sư phạm',
+        'Link nguồn file ảnh (Google Drive)', 'Tác giả', 'Ngày tạo'
+      ]);
+      return jsonResponse(sheet.getDataRange().getValues());
+    }
     var data = sheet.getDataRange().getValues();
     return jsonResponse(data);
   }
@@ -383,13 +445,26 @@ function doGet(e) {
 
 function doPost(e) {
   try {
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var payload = JSON.parse(e.postData.contents);
+    var payload = {};
+    if (e && e.postData && e.postData.contents) {
+      try {
+        payload = JSON.parse(e.postData.contents);
+      } catch (pErr) {
+        payload = {};
+      }
+    }
     var action = payload.action;
+    var ss = getTargetSpreadsheet(payload.sheetId);
+    var folder = getTargetFolder(payload.folderId);
     
     // Ghi điểm bài thi
     if (action === 'addSubmission') {
+      if (!ss) return jsonResponse({ error: 'Không tìm thấy Google Sheet' });
       var sheet = ss.getSheetByName('BangDiem');
+      if (!sheet) {
+        sheet = ss.insertSheet('BangDiem');
+        sheet.appendRow(['ID Bài nộp', 'Họ tên học sinh', 'Mã số HS', 'Lớp', 'Tên bài thi', 'Mã đề', 'Điểm số', 'Đúng/Tổng câu', 'Thời gian nộp']);
+      }
       sheet.appendRow([
         payload.id,
         payload.studentName,
@@ -406,7 +481,12 @@ function doPost(e) {
     
     // Thêm người dùng mới
     if (action === 'addUser') {
+      if (!ss) return jsonResponse({ error: 'Không tìm thấy Google Sheet' });
       var sheet = ss.getSheetByName('TaiKhoan');
+      if (!sheet) {
+        sheet = ss.insertSheet('TaiKhoan');
+        sheet.appendRow(['ID', 'Tên đăng nhập', 'Mật khẩu', 'Họ và tên', 'Email', 'Vai trò', 'Mã số', 'Khối', 'Lớp', 'Số điện thoại', 'Trạng thái', 'Ngày tạo']);
+      }
       sheet.appendRow([
         payload.id,
         payload.username,
@@ -424,8 +504,53 @@ function doPost(e) {
       return jsonResponse({ success: true });
     }
 
-    // Thêm hoặc cập nhật câu hỏi
+    // Tải ảnh trực tiếp lên Google Drive
+    if (action === 'uploadImage') {
+      var base64Data = payload.base64 || payload.imageBase64;
+      if (!base64Data) return jsonResponse({ error: 'Không có dữ liệu ảnh base64' });
+      if (base64Data.indexOf('base64,') > -1) {
+        base64Data = base64Data.split('base64,')[1];
+      }
+      var decoded = Utilities.base64Decode(base64Data);
+      var fileName = payload.fileName || ('cau_hoi_' + new Date().getTime() + '.png');
+      var blob = Utilities.newBlob(decoded, payload.mimeType || 'image/png', fileName);
+      var file = folder.createFile(blob);
+      file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+      var fileId = file.getId();
+      return jsonResponse({
+        success: true,
+        fileId: fileId,
+        viewLink: file.getUrl(),
+        displayUrl: 'https://lh3.googleusercontent.com/d/' + fileId
+      });
+    }
+
+    // Sao lưu toàn bộ danh sách câu hỏi lên Google Drive dưới dạng JSON
+    if (action === 'saveQuestionsToDrive') {
+      var fileName = 'PHU_HO_LMS_NganHangCauHoi.json';
+      var content = typeof payload.questionsJson === 'string'
+        ? payload.questionsJson
+        : JSON.stringify(payload.questionsJson || [], null, 2);
+      var files = folder.getFilesByName(fileName);
+      var driveFile;
+      if (files.hasNext()) {
+        driveFile = files.next();
+        driveFile.setContent(content);
+      } else {
+        driveFile = folder.createFile(fileName, content, MimeType.PLAIN_TEXT);
+      }
+      driveFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+      return jsonResponse({
+        success: true,
+        fileId: driveFile.getId(),
+        viewLink: driveFile.getUrl(),
+        folderUrl: folder.getUrl()
+      });
+    }
+
+    // Thêm hoặc cập nhật câu hỏi vào sheet CauHoi và sao lưu Google Drive
     if (action === 'addQuestion' || action === 'saveQuestion') {
+      if (!ss) return jsonResponse({ error: 'Không tìm thấy Google Sheet' });
       var sheet = ss.getSheetByName('CauHoi');
       if (!sheet) {
         sheet = ss.insertSheet('CauHoi');
@@ -435,6 +560,18 @@ function doPost(e) {
           'Phương án / Đáp án đúng', 'Giải thích sư phạm',
           'Link nguồn file ảnh (Google Drive)', 'Tác giả', 'Ngày tạo'
         ]);
+      }
+
+      // Xử lý upload ảnh lên Google Drive nếu có base64
+      var imageDriveUrl = payload.imageDriveUrl || payload.imageUrl || '';
+      if (payload.imageBase64 && String(payload.imageBase64).startsWith('data:image/')) {
+        try {
+          var b64 = payload.imageBase64.split('base64,')[1];
+          var imgBlob = Utilities.newBlob(Utilities.base64Decode(b64), 'image/png', 'img_' + (payload.code || new Date().getTime()) + '.png');
+          var imgFile = folder.createFile(imgBlob);
+          imgFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+          imageDriveUrl = imgFile.getUrl();
+        } catch (imgErr) {}
       }
       
       var data = sheet.getDataRange().getValues();
@@ -458,27 +595,47 @@ function doPost(e) {
         payload.type || 'SINGLE_CHOICE',
         payload.options || payload.correctAnswerText || payload.essaySampleAnswer || '',
         payload.explanation || '',
-        payload.imageDriveUrl || payload.imageUrl || '',
+        imageDriveUrl,
         payload.authorName || 'Giáo viên',
         payload.createdAt || new Date().toISOString().split('T')[0]
       ];
 
       if (targetRow > 0) {
         sheet.getRange(targetRow, 1, 1, rowValues.length).setValues([rowValues]);
-        return jsonResponse({ success: true, action: 'updated', id: payload.id });
       } else {
         sheet.appendRow(rowValues);
-        return jsonResponse({ success: true, action: 'inserted', id: payload.id });
       }
+
+      // Đồng thời cập nhật bản sao lưu Google Drive nếu có danh sách câu hỏi
+      if (payload.allQuestions) {
+        try {
+          var backupName = 'PHU_HO_LMS_NganHangCauHoi.json';
+          var bFiles = folder.getFilesByName(backupName);
+          var bContent = JSON.stringify(payload.allQuestions, null, 2);
+          if (bFiles.hasNext()) {
+            bFiles.next().setContent(bContent);
+          } else {
+            folder.createFile(backupName, bContent, MimeType.PLAIN_TEXT).setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+          }
+        } catch(bErr) {}
+      }
+
+      return jsonResponse({
+        success: true,
+        action: targetRow > 0 ? 'updated' : 'inserted',
+        id: payload.id,
+        imageDriveUrl: imageDriveUrl
+      });
     }
 
     // Xóa câu hỏi
     if (action === 'deleteQuestion') {
+      if (!ss) return jsonResponse({ error: 'Không tìm thấy Google Sheet' });
       var sheet = ss.getSheetByName('CauHoi');
       if (sheet) {
         var data = sheet.getDataRange().getValues();
         for (var i = 1; i < data.length; i++) {
-          if (data[i][0] == payload.id) {
+          if (data[i][0] == payload.id || (payload.code && data[i][1] == payload.code)) {
             sheet.deleteRow(i + 1);
             return jsonResponse({ success: true, action: 'deleted' });
           }
