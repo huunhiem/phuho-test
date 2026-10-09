@@ -32,7 +32,16 @@ export {
   extractSheetId,
   type SystemConnectionConfig
 };
-import { User, UserRole, Lesson } from '../types';
+import {
+  User,
+  UserRole,
+  Lesson,
+  Question,
+  QuestionDifficulty,
+  QuestionType,
+  OptionItem,
+  TrueFalseStatement
+} from '../types';
 import { GoogleDriveService } from './googleDriveService';
 
 // Initialize Firebase with support for env variable overrides on Vercel
@@ -851,6 +860,32 @@ export class GoogleSheetsService {
                   totalQuestions: s.totalQuestions
                 });
               }
+            } else if (ent === 'questions' || ent === 'all') {
+              const qs = LMSStorageService.getQuestions();
+              if (qs.length > 0) {
+                const q = qs[0];
+                this.postToAppsScript({
+                  action: 'saveQuestion',
+                  id: q.id,
+                  code: q.code,
+                  content: q.content,
+                  grade: q.gradeLevel,
+                  gradeLevel: q.gradeLevel,
+                  topic: q.topic,
+                  topicId: q.topic,
+                  lessonTitle: q.lessonTitle || '',
+                  learningOutcome: q.learningOutcome || '',
+                  difficulty: q.difficulty,
+                  type: q.type,
+                  options: q.options
+                    ? q.options.map((o) => `${o.isCorrect ? '[x]' : '[ ]'} ${o.text}`).join(' | ')
+                    : q.correctAnswerText || q.essaySampleAnswer || '',
+                  explanation: q.explanation || '',
+                  imageDriveUrl: q.imageDriveUrl || q.imageUrl || '',
+                  authorName: q.authorName || 'Giáo viên',
+                  createdAt: q.createdAt
+                });
+              }
             }
           }
         }
@@ -1056,6 +1091,128 @@ export class GoogleSheetsService {
   }
 
   /**
+   * Tải danh sách Câu hỏi từ sheet CauHoi trên Google Sheet về LMS
+   */
+  static async pullQuestionsFromSheet(
+    spreadsheetId: string,
+    accessToken: string
+  ): Promise<number> {
+    const rows = await this.readSheetValues(spreadsheetId, 'CauHoi!A2:N', accessToken);
+    if (!rows || rows.length === 0) return 0;
+
+    const importedQuestions: Question[] = [];
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      if (!row || !row[2]) continue;
+
+      const id = String(row[0] || `q-${Date.now()}-${i}`);
+      const code = String(row[1] || '').trim();
+      const content = String(row[2]).trim();
+      const rawGrade = String(row[3] || '6');
+      const gradeLevel = parseInt(rawGrade.replace(/[^0-9]/g, ''), 10) || 6;
+      const topic = String(row[4] || 'Chủ đề A: Máy tính và cộng đồng').trim();
+
+      let lessonTitle = '';
+      let learningOutcome = '';
+      let difficulty: QuestionDifficulty = 'BIET';
+      let type: QuestionType = 'SINGLE_CHOICE';
+      let rawOptions = '';
+      let explanation = '';
+      let imageDriveUrl = '';
+      let authorName = 'Giáo viên';
+      let createdAt = new Date().toISOString().split('T')[0];
+
+      const is14Col = ['BIET', 'HIEU', 'VAN_DUNG', 'VAN_DUNG_CAO'].includes(String(row[7]).toUpperCase());
+      if (is14Col) {
+        lessonTitle = String(row[5] || '');
+        learningOutcome = String(row[6] || '');
+        difficulty = (['BIET', 'HIEU', 'VAN_DUNG', 'VAN_DUNG_CAO'].includes(String(row[7]).toUpperCase())
+          ? String(row[7]).toUpperCase()
+          : 'BIET') as QuestionDifficulty;
+        type = (['SINGLE_CHOICE', 'MULTIPLE_CHOICE', 'TRUE_FALSE', 'FILL_IN_BLANK', 'ESSAY'].includes(String(row[8]))
+          ? String(row[8])
+          : 'SINGLE_CHOICE') as QuestionType;
+        rawOptions = String(row[9] || '');
+        explanation = String(row[10] || '');
+        imageDriveUrl = String(row[11] || '');
+        authorName = String(row[12] || 'Giáo viên');
+        createdAt = String(row[13] || createdAt);
+      } else {
+        difficulty = (['BIET', 'HIEU', 'VAN_DUNG', 'VAN_DUNG_CAO'].includes(String(row[5]).toUpperCase())
+          ? String(row[5]).toUpperCase()
+          : 'BIET') as QuestionDifficulty;
+        type = (['SINGLE_CHOICE', 'MULTIPLE_CHOICE', 'TRUE_FALSE', 'FILL_IN_BLANK', 'ESSAY'].includes(String(row[6]))
+          ? String(row[6])
+          : 'SINGLE_CHOICE') as QuestionType;
+        rawOptions = String(row[7] || '');
+        explanation = String(row[8] || '');
+        imageDriveUrl = String(row[9] || '');
+        authorName = String(row[10] || 'Giáo viên');
+        createdAt = String(row[11] || createdAt);
+      }
+
+      const options: OptionItem[] = [];
+      const trueFalseStatements: TrueFalseStatement[] = [];
+      if (rawOptions && rawOptions.includes('|')) {
+        const parts = rawOptions.split('|');
+        parts.forEach((p, idx) => {
+          const trimmedP = p.trim();
+          const isCorrect = trimmedP.startsWith('[x]') || trimmedP.startsWith('[X]');
+          const text = trimmedP.replace(/^\[[ xX]\]\s*/, '');
+          options.push({
+            id: `opt-${id}-${idx + 1}`,
+            text,
+            isCorrect
+          });
+          if (type === 'TRUE_FALSE') {
+            trueFalseStatements.push({
+              id: `tf-${id}-${idx + 1}`,
+              statement: text,
+              isCorrect
+            });
+          }
+        });
+      }
+
+      const directImageUrl = GoogleDriveService.getDriveDirectImageUrl(imageDriveUrl);
+
+      importedQuestions.push({
+        id,
+        code: code || `TH${gradeLevel}-00${i + 1}`,
+        content,
+        gradeLevel,
+        topic,
+        lessonTitle: lessonTitle || 'Bài 1: Thông tin và dữ liệu',
+        learningOutcome: learningOutcome || 'Chuẩn kiến thức GDPT 2018',
+        difficulty,
+        type,
+        options: options.length > 0 ? options : [
+          { id: `opt-${id}-1`, text: 'Đáp án A', isCorrect: true },
+          { id: `opt-${id}-2`, text: 'Đáp án B', isCorrect: false },
+          { id: `opt-${id}-3`, text: 'Đáp án C', isCorrect: false },
+          { id: `opt-${id}-4`, text: 'Đáp án D', isCorrect: false }
+        ],
+        trueFalseStatements: trueFalseStatements.length > 0 ? trueFalseStatements : undefined,
+        correctAnswerText: type === 'FILL_IN_BLANK' ? rawOptions.replace(/^\[[ xX]\]\s*/, '') : undefined,
+        essaySampleAnswer: type === 'ESSAY' ? rawOptions : undefined,
+        explanation,
+        imageDriveUrl: imageDriveUrl || undefined,
+        imageUrl: directImageUrl || undefined,
+        createdBy: 'system',
+        authorName,
+        createdAt,
+        status: 'ACTIVE'
+      });
+    }
+
+    if (importedQuestions.length > 0) {
+      LMSStorageService.importQuestions(importedQuestions);
+    }
+
+    return importedQuestions.length;
+  }
+
+  /**
    * Kiểm tra kết nối tới Google Apps Script Web App của Google Sheet
    */
   static async testAppsScriptConnection(): Promise<{ success: boolean; count?: number; message: string }> {
@@ -1235,60 +1392,109 @@ export class GoogleSheetsService {
           const qData = await qRes.json();
           if (Array.isArray(qData) && qData.length > 1) {
             const rows = qData.slice(1);
-            const importedQuestions: any[] = [];
+            const importedQuestions: Question[] = [];
 
-            for (const row of rows) {
+            for (let i = 0; i < rows.length; i++) {
+              const row = rows[i];
               if (!row || !row[2]) continue;
-              const id = String(row[0] || `q-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`);
+              const id = String(row[0] || `q-${Date.now()}-${i}`);
               const code = String(row[1] || '').trim();
               const content = String(row[2]).trim();
-              const grade = parseInt(String(row[3] || '6').replace(/[^0-9]/g, ''), 10) || 6;
-              const topicId = String(row[4] || 'top-a').trim();
-              const difficulty = (['BIET', 'HIEU', 'VAN_DUNG', 'VAN_DUNG_CAO'].includes(String(row[5]))
-                ? String(row[5])
-                : 'BIET') as any;
-              const type = (['SINGLE_CHOICE', 'MULTIPLE_CHOICE', 'TRUE_FALSE', 'FILL_IN_BLANK', 'ESSAY'].includes(
-                String(row[6])
-              )
-                ? String(row[6])
-                : 'SINGLE_CHOICE') as any;
-              const rawOptions = String(row[7] || '');
-              const explanation = String(row[8] || '');
-              const imageDriveUrl = String(row[9] || '');
-              const directImageUrl = GoogleDriveService.getDriveDirectImageUrl(imageDriveUrl);
-              const author = String(row[10] || 'Giáo viên');
-              const createdAt = String(row[11] || new Date().toISOString().split('T')[0]);
+              const rawGrade = String(row[3] || '6');
+              const gradeLevel = parseInt(rawGrade.replace(/[^0-9]/g, ''), 10) || 6;
+              const rawTopic = String(row[4] || 'Chủ đề A: Máy tính và cộng đồng').trim();
+              const topic = rawTopic || 'Chủ đề A: Máy tính và cộng đồng';
 
-              const options: any[] = [];
+              let lessonTitle = '';
+              let learningOutcome = '';
+              let difficulty: QuestionDifficulty = 'BIET';
+              let type: QuestionType = 'SINGLE_CHOICE';
+              let rawOptions = '';
+              let explanation = '';
+              let imageDriveUrl = '';
+              let author = 'Giáo viên';
+              let createdAt = new Date().toISOString().split('T')[0];
+
+              const is14Col = ['BIET', 'HIEU', 'VAN_DUNG', 'VAN_DUNG_CAO'].includes(String(row[7]).toUpperCase());
+              if (is14Col) {
+                lessonTitle = String(row[5] || '');
+                learningOutcome = String(row[6] || '');
+                difficulty = (['BIET', 'HIEU', 'VAN_DUNG', 'VAN_DUNG_CAO'].includes(String(row[7]).toUpperCase())
+                  ? String(row[7]).toUpperCase()
+                  : 'BIET') as QuestionDifficulty;
+                type = (['SINGLE_CHOICE', 'MULTIPLE_CHOICE', 'TRUE_FALSE', 'FILL_IN_BLANK', 'ESSAY'].includes(String(row[8]))
+                  ? String(row[8])
+                  : 'SINGLE_CHOICE') as QuestionType;
+                rawOptions = String(row[9] || '');
+                explanation = String(row[10] || '');
+                imageDriveUrl = String(row[11] || '');
+                author = String(row[12] || 'Giáo viên');
+                createdAt = String(row[13] || createdAt);
+              } else {
+                difficulty = (['BIET', 'HIEU', 'VAN_DUNG', 'VAN_DUNG_CAO'].includes(String(row[5]).toUpperCase())
+                  ? String(row[5]).toUpperCase()
+                  : 'BIET') as QuestionDifficulty;
+                type = (['SINGLE_CHOICE', 'MULTIPLE_CHOICE', 'TRUE_FALSE', 'FILL_IN_BLANK', 'ESSAY'].includes(String(row[6]))
+                  ? String(row[6])
+                  : 'SINGLE_CHOICE') as QuestionType;
+                rawOptions = String(row[7] || '');
+                explanation = String(row[8] || '');
+                imageDriveUrl = String(row[9] || '');
+                author = String(row[10] || 'Giáo viên');
+                createdAt = String(row[11] || createdAt);
+              }
+
+              const directImageUrl = GoogleDriveService.getDriveDirectImageUrl(imageDriveUrl);
+
+              const options: OptionItem[] = [];
+              const trueFalseStatements: TrueFalseStatement[] = [];
               if (rawOptions && rawOptions.includes('|')) {
                 const parts = rawOptions.split('|');
                 parts.forEach((p, idx) => {
                   const trimmedP = p.trim();
-                  const isCorrect = trimmedP.startsWith('[x]');
-                  const text = trimmedP.replace(/^\[[ x]\]\s*/, '');
+                  const isCorrect = trimmedP.startsWith('[x]') || trimmedP.startsWith('[X]');
+                  const text = trimmedP.replace(/^\[[ xX]\]\s*/, '');
                   options.push({
-                    id: `opt-${id}-${idx}`,
-                    text: text,
+                    id: `opt-${id}-${idx + 1}`,
+                    text,
                     isCorrect
                   });
+                  if (type === 'TRUE_FALSE') {
+                    trueFalseStatements.push({
+                      id: `tf-${id}-${idx + 1}`,
+                      statement: text,
+                      isCorrect
+                    });
+                  }
                 });
               }
 
               importedQuestions.push({
                 id,
-                code,
+                code: code || `TH${gradeLevel}-00${i + 1}`,
                 content,
-                grade,
-                topicId,
+                gradeLevel,
+                topic,
+                lessonTitle: lessonTitle || 'Bài 1: Thông tin và dữ liệu',
+                learningOutcome: learningOutcome || 'Chuẩn kiến thức GDPT 2018',
                 difficulty,
                 type,
-                options,
-                correctAnswer: type === 'FILL_IN_BLANK' ? rawOptions : undefined,
+                options: options.length > 0 ? options : [
+                  { id: `opt-${id}-1`, text: 'Đáp án A', isCorrect: true },
+                  { id: `opt-${id}-2`, text: 'Đáp án B', isCorrect: false },
+                  { id: `opt-${id}-3`, text: 'Đáp án C', isCorrect: false },
+                  { id: `opt-${id}-4`, text: 'Đáp án D', isCorrect: false }
+                ],
+                trueFalseStatements: trueFalseStatements.length > 0 ? trueFalseStatements : undefined,
+                correctAnswerText: type === 'FILL_IN_BLANK' ? rawOptions.replace(/^\[[ xX]\]\s*/, '') : undefined,
+                essaySampleAnswer: type === 'ESSAY' ? rawOptions : undefined,
                 explanation,
                 imageDriveUrl: imageDriveUrl || undefined,
                 imageUrl: directImageUrl || undefined,
+                createdBy: 'system',
                 authorName: author,
-                createdAt
+                createdAt,
+                status: 'ACTIVE'
               });
             }
 
@@ -1296,10 +1502,16 @@ export class GoogleSheetsService {
               LMSStorageService.importQuestions(importedQuestions);
               questionsCount = importedQuestions.length;
             }
+          } else {
+            // Google Sheet chưa có câu hỏi, giữ nguyên các câu hỏi hiện có trong LMS
+            questionsCount = LMSStorageService.getQuestions().length;
           }
+        } else {
+          questionsCount = LMSStorageService.getQuestions().length;
         }
       } catch (e) {
         console.warn('Lỗi tải questions từ Apps Script:', e);
+        questionsCount = LMSStorageService.getQuestions().length;
       }
 
       notifyAutoSyncListeners({

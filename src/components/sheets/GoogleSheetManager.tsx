@@ -261,6 +261,13 @@ export const GoogleSheetManager: React.FC<GoogleSheetManagerProps> = ({ currentU
     setDriveFolderUrlInput(updated.driveFolderUrl || '');
     setSaveSuccessMsg('✓ Đã lưu và áp dụng cấu hình kết nối dữ liệu thành công cho toàn bộ Giáo viên & Học sinh trong trường!');
     setTimeout(() => setSaveSuccessMsg(''), 5000);
+
+    // Kích hoạt đồng bộ nền ngay lập tức để nạp toàn bộ câu hỏi và dữ liệu về hệ thống
+    if (updated.appsScriptUrl) {
+      GoogleSheetsService.syncFromAppsScript().catch((err) => {
+        console.warn('Lỗi đồng bộ tự động sau khi lưu cấu hình:', err);
+      });
+    }
   };
 
   const handleTestAppsScript = async () => {
@@ -417,24 +424,67 @@ function doPost(e) {
       return jsonResponse({ success: true });
     }
 
-    // Thêm câu hỏi mới
-    if (action === 'addQuestion') {
+    // Thêm hoặc cập nhật câu hỏi
+    if (action === 'addQuestion' || action === 'saveQuestion') {
       var sheet = ss.getSheetByName('CauHoi');
-      sheet.appendRow([
+      if (!sheet) {
+        sheet = ss.insertSheet('CauHoi');
+        sheet.appendRow([
+          'ID', 'Mã câu', 'Nội dung', 'Khối', 'Chủ đề',
+          'Tên bài học', 'Yêu cầu cần đạt', 'Mức độ', 'Dạng câu',
+          'Phương án / Đáp án đúng', 'Giải thích sư phạm',
+          'Link nguồn file ảnh (Google Drive)', 'Tác giả', 'Ngày tạo'
+        ]);
+      }
+      
+      var data = sheet.getDataRange().getValues();
+      var targetRow = -1;
+      for (var i = 1; i < data.length; i++) {
+        if (data[i][0] == payload.id || (payload.code && data[i][1] == payload.code)) {
+          targetRow = i + 1;
+          break;
+        }
+      }
+
+      var rowValues = [
         payload.id,
         payload.code || '',
         payload.content || '',
-        payload.grade || 6,
-        payload.topicId || '',
+        payload.gradeLevel || payload.grade || 6,
+        payload.topic || payload.topicId || 'Chủ đề A: Máy tính và cộng đồng',
+        payload.lessonTitle || 'Bài 1: Thông tin và dữ liệu',
+        payload.learningOutcome || 'Chuẩn kiến thức GDPT 2018',
         payload.difficulty || 'BIET',
         payload.type || 'SINGLE_CHOICE',
-        payload.options || '',
+        payload.options || payload.correctAnswerText || payload.essaySampleAnswer || '',
         payload.explanation || '',
-        payload.imageDriveUrl || '',
-        payload.authorName || '',
-        new Date().toISOString()
-      ]);
-      return jsonResponse({ success: true });
+        payload.imageDriveUrl || payload.imageUrl || '',
+        payload.authorName || 'Giáo viên',
+        payload.createdAt || new Date().toISOString().split('T')[0]
+      ];
+
+      if (targetRow > 0) {
+        sheet.getRange(targetRow, 1, 1, rowValues.length).setValues([rowValues]);
+        return jsonResponse({ success: true, action: 'updated', id: payload.id });
+      } else {
+        sheet.appendRow(rowValues);
+        return jsonResponse({ success: true, action: 'inserted', id: payload.id });
+      }
+    }
+
+    // Xóa câu hỏi
+    if (action === 'deleteQuestion') {
+      var sheet = ss.getSheetByName('CauHoi');
+      if (sheet) {
+        var data = sheet.getDataRange().getValues();
+        for (var i = 1; i < data.length; i++) {
+          if (data[i][0] == payload.id) {
+            sheet.deleteRow(i + 1);
+            return jsonResponse({ success: true, action: 'deleted' });
+          }
+        }
+      }
+      return jsonResponse({ success: true, action: 'not_found' });
     }
 
     return jsonResponse({ error: 'Unsupported action: ' + action });

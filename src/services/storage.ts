@@ -8,6 +8,8 @@ import {
   Topic,
   Lesson,
   Question,
+  QuestionDifficulty,
+  QuestionType,
   Test,
   Assignment,
   Submission,
@@ -309,16 +311,53 @@ export class LMSStorageService {
 
   // Questions
   static getQuestions(): Question[] {
-    const list = getStored<Question[]>(STORAGE_KEYS.QUESTIONS, INITIAL_QUESTIONS);
-    if (list.length > 0 && !list.some((q) => q.imageUrl)) {
-      const q1 = list.find((q) => q.id === 'q-01');
+    const raw = getStored<Question[]>(STORAGE_KEYS.QUESTIONS, INITIAL_QUESTIONS);
+    const topics = this.getTopics();
+
+    // Chuẩn hóa và khắc phục dữ liệu câu hỏi nếu có trường bị thiếu từ Google Sheet
+    const normalized: Question[] = (raw && raw.length > 0 ? raw : INITIAL_QUESTIONS).map((q, idx) => {
+      const gradeLevel = Number(q.gradeLevel || (q as any).grade) || 6;
+      let topic = q.topic || (q as any).topicName;
+      if (!topic && (q as any).topicId) {
+        const found = topics.find((t) => t.id === (q as any).topicId);
+        topic = found ? found.name : 'Chủ đề A: Máy tính và cộng đồng';
+      }
+      if (!topic) {
+        topic = 'Chủ đề A: Máy tính và cộng đồng';
+      }
+
+      return {
+        ...q,
+        id: q.id || `q-${idx + 1}`,
+        code: q.code || `TH${gradeLevel}-00${idx + 1}`,
+        content: q.content || '',
+        gradeLevel,
+        topic,
+        lessonTitle: q.lessonTitle || 'Bài 1: Thông tin và dữ liệu',
+        learningOutcome: q.learningOutcome || 'Chuẩn kiến thức GDPT 2018',
+        difficulty: (['BIET', 'HIEU', 'VAN_DUNG', 'VAN_DUNG_CAO'].includes(q.difficulty) ? q.difficulty : 'BIET') as QuestionDifficulty,
+        type: (['SINGLE_CHOICE', 'MULTIPLE_CHOICE', 'TRUE_FALSE', 'FILL_IN_BLANK', 'ESSAY'].includes(q.type) ? q.type : 'SINGLE_CHOICE') as QuestionType,
+        options: Array.isArray(q.options) && q.options.length > 0 ? q.options : [
+          { id: `opt-${q.id || idx}-1`, text: 'Đáp án A', isCorrect: true },
+          { id: `opt-${q.id || idx}-2`, text: 'Đáp án B', isCorrect: false },
+          { id: `opt-${q.id || idx}-3`, text: 'Đáp án C', isCorrect: false },
+          { id: `opt-${q.id || idx}-4`, text: 'Đáp án D', isCorrect: false }
+        ],
+        authorName: q.authorName || 'Giáo viên',
+        createdAt: q.createdAt || new Date().toISOString().split('T')[0],
+        status: (q.status === 'DRAFT' ? 'DRAFT' : 'ACTIVE') as 'ACTIVE' | 'DRAFT'
+      };
+    });
+
+    if (!normalized.some((q) => q.imageUrl)) {
+      const q1 = normalized.find((q) => q.id === 'q-01');
       if (q1) {
         q1.imageUrl = 'https://images.unsplash.com/photo-1587829741301-dc798b83add3?auto=format&fit=crop&w=800&q=80';
         q1.imageDriveUrl = 'https://drive.google.com/file/d/1A_thcsphuho_keyboard_input/view?usp=sharing';
-        setStored(STORAGE_KEYS.QUESTIONS, list);
       }
     }
-    return list;
+
+    return normalized;
   }
 
   static addQuestion(q: Question): void {
@@ -346,10 +385,15 @@ export class LMSStorageService {
   }
 
   static importQuestions(newQuestions: Question[]): void {
+    if (!newQuestions || newQuestions.length === 0) return;
     const existing = this.getQuestions();
     const map = new Map<string, Question>();
     existing.forEach((q) => map.set(q.id, q));
-    newQuestions.forEach((q) => map.set(q.id, q));
+    newQuestions.forEach((q) => {
+      if (q && q.id) {
+        map.set(q.id, q);
+      }
+    });
     const merged = Array.from(map.values());
     setStored(STORAGE_KEYS.QUESTIONS, merged);
     notifyChange('questions');

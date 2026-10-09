@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   HelpCircle,
   Plus,
@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { Question, QuestionDifficulty, QuestionType, User, OptionItem, TrueFalseStatement } from '../../types';
 import { LMSStorageService } from '../../services/storage';
+import { onStorageChange } from '../../services/storageEvents';
 import { GeminiService } from '../../services/geminiService';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 import { GoogleDriveService } from '../../services/googleDriveService';
@@ -32,7 +33,9 @@ import {
   getGoogleAccessToken,
   signInWithGoogleSheets,
   clearGoogleToken,
-  isAuthErrorMessage
+  isAuthErrorMessage,
+  GoogleSheetsService,
+  getAppsScriptUrl
 } from '../../services/googleSheetsService';
 
 interface QuestionBankProps {
@@ -120,6 +123,35 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({ currentUser }) => {
   const refreshQuestions = () => {
     setQuestions(LMSStorageService.getQuestions());
   };
+
+  // Lắng nghe mọi thay đổi lưu trữ từ hệ thống hoặc tab khác
+  useEffect(() => {
+    const unsubscribe = onStorageChange((entity) => {
+      if (entity === 'questions' || entity === 'all') {
+        refreshQuestions();
+      }
+    });
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+
+  // Luôn nạp dữ liệu câu hỏi hệ thống khi mở trang và đồng bộ nền với Google Sheet của trường
+  useEffect(() => {
+    refreshQuestions();
+    const scriptUrl = getAppsScriptUrl();
+    if (scriptUrl) {
+      GoogleSheetsService.syncFromAppsScript()
+        .then((res) => {
+          if (res.success && res.questions > 0) {
+            refreshQuestions();
+          }
+        })
+        .catch((e) => {
+          console.warn('Lỗi đồng bộ nền câu hỏi từ Google Sheet:', e);
+        });
+    }
+  }, []);
 
   const handleOpenAdd = () => {
     setEditingQuestion(null);
@@ -375,6 +407,11 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({ currentUser }) => {
   const confirmDeleteQuestion = () => {
     if (deleteQuestionId) {
       LMSStorageService.deleteQuestion(deleteQuestionId);
+      // Gửi lệnh xóa lên Google Sheet qua Apps Script
+      GoogleSheetsService.postToAppsScript({
+        action: 'deleteQuestion',
+        id: deleteQuestionId
+      });
       refreshQuestions();
       setDeleteQuestionId(null);
     }
@@ -389,12 +426,12 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({ currentUser }) => {
         ...editingQuestion,
         code: formData.code,
         content: formData.content,
-        gradeLevel: Number(formData.gradeLevel),
-        topic: formData.topic,
-        lessonTitle: formData.lessonTitle,
-        learningOutcome: formData.learningOutcome,
-        difficulty: formData.difficulty,
-        type: formData.type,
+        gradeLevel: Number(formData.gradeLevel) || 6,
+        topic: formData.topic || 'Chủ đề A: Máy tính và cộng đồng',
+        lessonTitle: formData.lessonTitle || 'Bài 1: Thông tin và dữ liệu',
+        learningOutcome: formData.learningOutcome || 'Chuẩn kiến thức GDPT 2018',
+        difficulty: formData.difficulty || 'BIET',
+        type: formData.type || 'SINGLE_CHOICE',
         options: formData.options,
         trueFalseStatements: formData.trueFalseStatements,
         correctAnswerText: formData.correctAnswerText,
@@ -405,17 +442,40 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({ currentUser }) => {
         imageDriveFileId: formData.imageDriveFileId || undefined
       };
       LMSStorageService.updateQuestion(updated);
+
+      // Đẩy cập nhật câu hỏi lên Google Sheet tự động
+      GoogleSheetsService.postToAppsScript({
+        action: 'saveQuestion',
+        id: updated.id,
+        code: updated.code,
+        content: updated.content,
+        gradeLevel: updated.gradeLevel,
+        grade: updated.gradeLevel,
+        topic: updated.topic,
+        topicId: updated.topic,
+        lessonTitle: updated.lessonTitle,
+        learningOutcome: updated.learningOutcome,
+        difficulty: updated.difficulty,
+        type: updated.type,
+        options: updated.options
+          ? updated.options.map((o) => `${o.isCorrect ? '[x]' : '[ ]'} ${o.text}`).join(' | ')
+          : updated.correctAnswerText || updated.essaySampleAnswer || '',
+        explanation: updated.explanation || '',
+        imageDriveUrl: updated.imageDriveUrl || updated.imageUrl || '',
+        authorName: updated.authorName || currentUser.fullName,
+        createdAt: updated.createdAt || new Date().toISOString().split('T')[0]
+      });
     } else {
       const newQ: Question = {
         id: `q-${Date.now()}`,
         code: formData.code || `TH${formData.gradeLevel}-00${Math.floor(10 + Math.random() * 90)}`,
         content: formData.content,
-        gradeLevel: Number(formData.gradeLevel),
-        topic: formData.topic,
-        lessonTitle: formData.lessonTitle,
-        learningOutcome: formData.learningOutcome,
-        difficulty: formData.difficulty,
-        type: formData.type,
+        gradeLevel: Number(formData.gradeLevel) || 6,
+        topic: formData.topic || 'Chủ đề A: Máy tính và cộng đồng',
+        lessonTitle: formData.lessonTitle || 'Bài 1: Thông tin và dữ liệu',
+        learningOutcome: formData.learningOutcome || 'Chuẩn kiến thức GDPT 2018',
+        difficulty: formData.difficulty || 'BIET',
+        type: formData.type || 'SINGLE_CHOICE',
         options: formData.options,
         trueFalseStatements: formData.trueFalseStatements,
         correctAnswerText: formData.correctAnswerText,
@@ -430,6 +490,29 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({ currentUser }) => {
         status: 'ACTIVE'
       };
       LMSStorageService.addQuestion(newQ);
+
+      // Đẩy câu hỏi mới lên Google Sheet tự động
+      GoogleSheetsService.postToAppsScript({
+        action: 'saveQuestion',
+        id: newQ.id,
+        code: newQ.code,
+        content: newQ.content,
+        gradeLevel: newQ.gradeLevel,
+        grade: newQ.gradeLevel,
+        topic: newQ.topic,
+        topicId: newQ.topic,
+        lessonTitle: newQ.lessonTitle,
+        learningOutcome: newQ.learningOutcome,
+        difficulty: newQ.difficulty,
+        type: newQ.type,
+        options: newQ.options
+          ? newQ.options.map((o) => `${o.isCorrect ? '[x]' : '[ ]'} ${o.text}`).join(' | ')
+          : newQ.correctAnswerText || newQ.essaySampleAnswer || '',
+        explanation: newQ.explanation || '',
+        imageDriveUrl: newQ.imageDriveUrl || newQ.imageUrl || '',
+        authorName: newQ.authorName,
+        createdAt: newQ.createdAt
+      });
     }
 
     setIsModalOpen(false);
@@ -463,13 +546,19 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({ currentUser }) => {
   };
 
   const filteredQuestions = questions.filter((q) => {
-    const matchesSearch =
-      q.content.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      q.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      q.topic.toLowerCase().includes(searchTerm.toLowerCase());
+    const qContent = (q.content || '').toLowerCase();
+    const qCode = (q.code || '').toLowerCase();
+    const qTopic = (q.topic || '').toLowerCase();
+    const search = searchTerm.toLowerCase();
 
-    const matchesGrade = gradeFilter === 'ALL' || q.gradeLevel === Number(gradeFilter);
-    const matchesTopic = topicFilter === 'ALL' || q.topic.includes(topicFilter);
+    const matchesSearch =
+      qContent.includes(search) ||
+      qCode.includes(search) ||
+      qTopic.includes(search);
+
+    const qGrade = Number(q.gradeLevel || (q as any).grade || 6);
+    const matchesGrade = gradeFilter === 'ALL' || qGrade === Number(gradeFilter);
+    const matchesTopic = topicFilter === 'ALL' || (q.topic || '').includes(topicFilter);
     const matchesDifficulty = difficultyFilter === 'ALL' || q.difficulty === difficultyFilter;
     const matchesType = typeFilter === 'ALL' || q.type === typeFilter;
 

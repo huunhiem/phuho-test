@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   BookOpen,
   HelpCircle,
@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { User } from '../../types';
 import { LMSStorageService } from '../../services/storage';
+import { onStorageChange } from '../../services/storageEvents';
 import { NavTab } from '../Sidebar';
 
 interface TeacherDashboardProps {
@@ -20,11 +21,22 @@ interface TeacherDashboardProps {
 }
 
 export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ currentUser, onNavigate }) => {
-  const classes = LMSStorageService.getClasses();
-  const questions = LMSStorageService.getQuestions();
-  const tests = LMSStorageService.getTests();
-  const assignments = LMSStorageService.getAssignments();
-  const submissions = LMSStorageService.getSubmissions();
+  const [classes, setClasses] = useState(() => LMSStorageService.getClasses());
+  const [questions, setQuestions] = useState(() => LMSStorageService.getQuestions());
+  const [tests, setTests] = useState(() => LMSStorageService.getTests());
+  const [assignments, setAssignments] = useState(() => LMSStorageService.getAssignments());
+  const [submissions, setSubmissions] = useState(() => LMSStorageService.getSubmissions());
+
+  useEffect(() => {
+    const unsub = onStorageChange(() => {
+      setClasses(LMSStorageService.getClasses());
+      setQuestions(LMSStorageService.getQuestions());
+      setTests(LMSStorageService.getTests());
+      setAssignments(LMSStorageService.getAssignments());
+      setSubmissions(LMSStorageService.getSubmissions());
+    });
+    return () => unsub();
+  }, []);
 
   const teacherQuestions = questions.filter((q) => q.createdBy === currentUser.id);
   const activeAssignments = assignments.filter((a) => a.status === 'ACTIVE');

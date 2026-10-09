@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   FileText,
   Plus,
@@ -36,6 +36,7 @@ import {
   MatrixCellConfig
 } from '../../types';
 import { LMSStorageService } from '../../services/storage';
+import { onStorageChange } from '../../services/storageEvents';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 
 interface TestBuilderProps {
@@ -307,7 +308,19 @@ export const MATRIX_PRESETS = [
 
 export const TestBuilder: React.FC<TestBuilderProps> = ({ currentUser, onTestCreated }) => {
   const [tests, setTests] = useState<Test[]>(() => LMSStorageService.getTests());
-  const [questions] = useState<Question[]>(() => LMSStorageService.getQuestions());
+  const [questions, setQuestions] = useState<Question[]>(() => LMSStorageService.getQuestions());
+
+  useEffect(() => {
+    const unsub = onStorageChange((entity) => {
+      if (entity === 'questions' || entity === 'all') {
+        setQuestions(LMSStorageService.getQuestions());
+      }
+      if (entity === 'tests' || entity === 'all') {
+        setTests(LMSStorageService.getTests());
+      }
+    });
+    return () => unsub();
+  }, []);
 
   // Form State for creating new test
   const [isCreating, setIsCreating] = useState(false);

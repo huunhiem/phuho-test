@@ -121,6 +121,14 @@ export const LMSApi = {
     return result.data || [];
   },
 
+  async saveQuestion(question: any) {
+    return request('saveQuestion', 'POST', question);
+  },
+
+  async deleteQuestion(id: string) {
+    return request('deleteQuestion', 'POST', { id });
+  },
+
   async getExams() {
     const result = await request<any[]>('getExams', 'GET');
     if (!result.success) {
