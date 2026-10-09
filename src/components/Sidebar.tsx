@@ -75,7 +75,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           { id: 'question_bank', label: 'Ngân hàng câu hỏi', icon: <HelpCircle className="w-5 h-5" /> },
           { id: 'test_builder', label: 'Đề kiểm tra', icon: <FileText className="w-5 h-5" /> },
           { id: 'admin_import', label: 'Import Excel / CSV', icon: <FileSpreadsheet className="w-5 h-5" /> },
-          { id: 'google_sheets', label: 'Google Sheet Database', icon: <FileSpreadsheet className="w-5 h-5 text-emerald-600" /> },
+          { id: 'google_sheets', label: 'Cấu hình CSDL Google Sheet', icon: <FileSpreadsheet className="w-5 h-5 text-emerald-600" /> },
           { id: 'firebase_guide', label: 'Cấu hình Firebase', icon: <CloudCog className="w-5 h-5" /> }
         ];
 
@@ -85,8 +85,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           { id: 'question_bank', label: 'Ngân hàng câu hỏi', icon: <HelpCircle className="w-5 h-5" /> },
           { id: 'test_builder', label: 'Giám sát Đề thi', icon: <FileText className="w-5 h-5" /> },
           { id: 'results', label: 'Kết quả toàn trường', icon: <Award className="w-5 h-5" /> },
-          { id: 'question_analysis', label: 'Phân tích câu hỏi', icon: <BarChart3 className="w-5 h-5" /> },
-          { id: 'google_sheets', label: 'Google Sheet Database', icon: <FileSpreadsheet className="w-5 h-5 text-emerald-600" /> }
+          { id: 'question_analysis', label: 'Phân tích câu hỏi', icon: <BarChart3 className="w-5 h-5" /> }
         ];
 
       case 'DEPARTMENT_HEAD':
@@ -96,8 +95,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           { id: 'test_builder', label: 'Tạo đề kiểm tra', icon: <FileText className="w-5 h-5" /> },
           { id: 'assignments', label: 'Giao bài theo khối', icon: <Send className="w-5 h-5" /> },
           { id: 'results', label: 'Kết quả & Chấm điểm', icon: <Award className="w-5 h-5" /> },
-          { id: 'question_analysis', label: 'Phân tích câu hỏi', icon: <BarChart3 className="w-5 h-5" /> },
-          { id: 'google_sheets', label: 'Google Sheet Database', icon: <FileSpreadsheet className="w-5 h-5 text-emerald-600" /> }
+          { id: 'question_analysis', label: 'Phân tích câu hỏi', icon: <BarChart3 className="w-5 h-5" /> }
         ];
 
       case 'TEACHER':
@@ -108,8 +106,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           { id: 'test_builder', label: 'Tạo đề kiểm tra', icon: <FileText className="w-5 h-5" /> },
           { id: 'assignments', label: 'Giao bài kiểm tra', icon: <Send className="w-5 h-5" /> },
           { id: 'results', label: 'Kết quả & Chấm điểm', icon: <Award className="w-5 h-5" /> },
-          { id: 'question_analysis', label: 'Phân tích câu hỏi', icon: <BarChart3 className="w-5 h-5" /> },
-          { id: 'google_sheets', label: 'Google Sheet Database', icon: <FileSpreadsheet className="w-5 h-5 text-emerald-600" /> }
+          { id: 'question_analysis', label: 'Phân tích câu hỏi', icon: <BarChart3 className="w-5 h-5" /> }
         ];
 
       case 'STUDENT':

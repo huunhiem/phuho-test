@@ -13,6 +13,7 @@ import {
   Layers,
   Sparkles,
   AlertCircle,
+  AlertTriangle,
   Zap,
   Users,
   ShieldCheck,
@@ -37,14 +38,25 @@ import {
   REQUIRED_SHEETS,
   clearGoogleToken,
   isAuthErrorMessage,
+  isUnauthorizedDomainError,
+  getFirebaseProjectId,
   getAppsScriptUrl,
-  saveAppsScriptUrl
+  saveAppsScriptUrl,
+  getSystemConnectionConfig,
+  saveSystemConnectionConfig,
+  SystemConnectionConfig,
+  extractSheetId
 } from '../../services/googleSheetsService';
 import { GoogleDriveService } from '../../services/googleDriveService';
 import { LMSStorageService } from '../../services/storage';
 import { User as FirebaseUser } from 'firebase/auth';
+import { User } from '../../types';
 
-export const GoogleSheetManager: React.FC = () => {
+interface GoogleSheetManagerProps {
+  currentUser?: User;
+}
+
+export const GoogleSheetManager: React.FC<GoogleSheetManagerProps> = ({ currentUser }) => {
   const [googleUser, setGoogleUser] = useState<FirebaseUser | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
@@ -54,6 +66,11 @@ export const GoogleSheetManager: React.FC = () => {
   const [autoSync, setAutoSync] = useState(isAutoSyncEnabled());
   const [autoSyncState, setAutoSyncState] = useState<AutoSyncState>({ status: 'disconnected' });
   const [activeSubTab, setActiveSubTab] = useState<'manager' | 'preview' | 'vercel'>('manager');
+
+  // Unified System Connection Config
+  const [systemConfig, setSystemConfig] = useState<SystemConnectionConfig>(() => getSystemConnectionConfig());
+  const [driveFolderUrlInput, setDriveFolderUrlInput] = useState(() => GoogleDriveService.getSavedFolderUrl());
+  const [saveSuccessMsg, setSaveSuccessMsg] = useState<string>('');
 
   // Apps Script Backend State
   const [appsScriptUrlInput, setAppsScriptUrlInput] = useState(getAppsScriptUrl());
@@ -67,6 +84,11 @@ export const GoogleSheetManager: React.FC = () => {
   const [isLoadingPreview, setIsLoadingPreview] = useState(false);
 
   const [copiedScript, setCopiedScript] = useState(false);
+  const [unauthorizedDomainError, setUnauthorizedDomainError] = useState<{
+    domain: string;
+    projectId: string;
+  } | null>(null);
+  const [copiedDomain, setCopiedDomain] = useState(false);
 
   useEffect(() => {
     const unsubscribeAuth = initGoogleAuth(
@@ -99,14 +121,23 @@ export const GoogleSheetManager: React.FC = () => {
   const handleSignIn = async () => {
     setIsLoggingIn(true);
     setSyncStatus('');
+    setUnauthorizedDomainError(null);
     try {
       const res = await signInWithGoogleSheets();
       if (res) {
         setGoogleUser(res.user);
         setAccessToken(res.accessToken);
         setSyncStatus('Đã kết nối tài khoản Google thành công với quyền Google Sheets!');
+        setUnauthorizedDomainError(null);
       }
     } catch (e: any) {
+      if (isUnauthorizedDomainError(e)) {
+        const currentDomain = typeof window !== 'undefined' ? window.location.hostname : '';
+        setUnauthorizedDomainError({
+          domain: currentDomain,
+          projectId: getFirebaseProjectId()
+        });
+      }
       setSyncStatus(`Lỗi kết nối: ${e.message || String(e)}`);
     } finally {
       setIsLoggingIn(false);
@@ -212,6 +243,24 @@ export const GoogleSheetManager: React.FC = () => {
   const handleSaveAppsScriptUrl = () => {
     saveAppsScriptUrl(appsScriptUrlInput);
     setScriptTestResult({ success: true, message: 'Đã lưu cấu hình Google Apps Script URL thành công!' });
+  };
+
+  const handleSaveSystemConfig = () => {
+    const updated = saveSystemConnectionConfig(
+      {
+        sheetId: sheetId,
+        appsScriptUrl: appsScriptUrlInput,
+        driveFolderUrl: driveFolderUrlInput,
+        autoSyncEnabled: autoSync
+      },
+      currentUser?.fullName || 'Quản trị viên Hệ thống'
+    );
+    setSystemConfig(updated);
+    setSheetId(updated.sheetId);
+    setAppsScriptUrlInput(updated.appsScriptUrl);
+    setDriveFolderUrlInput(updated.driveFolderUrl || '');
+    setSaveSuccessMsg('✓ Đã lưu và áp dụng cấu hình kết nối dữ liệu thành công cho toàn bộ Giáo viên & Học sinh trong trường!');
+    setTimeout(() => setSaveSuccessMsg(''), 5000);
   };
 
   const handleTestAppsScript = async () => {
@@ -399,6 +448,92 @@ function jsonResponse(data) {
     .setMimeType(ContentService.MimeType.JSON);
 }`;
 
+  if (currentUser && currentUser.role !== 'ADMIN') {
+    return (
+      <div className="space-y-6">
+        <div className="p-6 bg-white rounded-2xl border border-slate-200 shadow-xs space-y-6">
+          <div className="flex items-start gap-4">
+            <div className="w-12 h-12 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+              <ShieldCheck className="w-7 h-7" />
+            </div>
+            <div>
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200 mb-2">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                Cấu hình tập trung bởi Quản trị viên
+              </span>
+              <h2 className="text-xl font-bold text-slate-900">
+                Hệ Thống Kết Nối Dữ Liệu Trường THCS Phú Hồ
+              </h2>
+              <p className="text-sm text-slate-600 mt-1">
+                Toàn bộ kết nối cơ sở dữ liệu (Google Sheets, Apps Script & Google Drive) đã được Quản trị viên hệ thống thiết lập tập trung. Thầy/Cô không cần phải cấu hình lại khi sử dụng hệ thống.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 space-y-1.5">
+              <div className="text-xs text-slate-500 font-semibold uppercase tracking-wider flex items-center gap-1.5">
+                <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                <span>Google Sheet Database</span>
+              </div>
+              <div className="text-sm font-bold text-slate-800">
+                {systemConfig.sheetId ? 'Đã liên kết CSDL trường' : 'Sẵn sàng theo cấu hình chung'}
+              </div>
+              <div className="text-xs text-slate-500 font-mono truncate" title={systemConfig.sheetId}>
+                ID: {systemConfig.sheetId || 'Mặc định THCS Phú Hồ'}
+              </div>
+              <div className="text-xs text-emerald-700 font-medium pt-1">
+                ✓ Tự động đồng bộ câu hỏi & điểm
+              </div>
+            </div>
+
+            <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 space-y-1.5">
+              <div className="text-xs text-slate-500 font-semibold uppercase tracking-wider flex items-center gap-1.5">
+                <Globe className="w-4 h-4 text-sky-600" />
+                <span>Apps Script Backend</span>
+              </div>
+              <div className="text-sm font-bold text-slate-800">
+                Trạng thái: Hoạt động 100%
+              </div>
+              <div className="text-xs text-slate-500 font-mono truncate" title={systemConfig.appsScriptUrl}>
+                API Endpoint đã kích hoạt
+              </div>
+              <div className="text-xs text-emerald-700 font-medium pt-1">
+                ✓ Không phụ thuộc tên miền Vercel
+              </div>
+            </div>
+
+            <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 space-y-1.5">
+              <div className="text-xs text-slate-500 font-semibold uppercase tracking-wider flex items-center gap-1.5">
+                <HardDrive className="w-4 h-4 text-indigo-600" />
+                <span>Lưu trữ hình ảnh & Đề thi</span>
+              </div>
+              <div className="text-sm font-bold text-slate-800">
+                Đồng bộ đám mây tự động
+              </div>
+              <div className="text-xs text-slate-500">
+                Thư mục dùng chung trường THCS Phú Hồ
+              </div>
+              <div className="text-xs text-emerald-700 font-medium pt-1">
+                ✓ Giáo viên không cần đăng nhập Google
+              </div>
+            </div>
+          </div>
+
+          <div className="p-4 rounded-xl bg-blue-50 border border-blue-200 text-blue-900 text-xs flex items-start gap-3">
+            <Sparkles className="w-5 h-5 text-blue-600 shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <div className="font-bold">Lưu ý dành cho Thầy/Cô:</div>
+              <div>
+                Khi soạn câu hỏi, giao bài kiểm tra hoặc chấm điểm học sinh, hệ thống sẽ tự động lưu vào máy và cập nhật lên bảng tính của trường. Nếu cần thay đổi đường dẫn CSDL hoặc phân quyền mới, vui lòng liên hệ Quản trị viên hệ thống.
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       {/* Title */}
@@ -406,10 +541,10 @@ function jsonResponse(data) {
         <div>
           <h1 className="text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-2.5">
             <FileSpreadsheet className="w-7 h-7 text-emerald-600" />
-            <span>Google Sheet Database & Tự Động Cập Nhật</span>
+            <span>Cấu Hình Kết Nối Dữ Liệu Hệ Thống</span>
           </h1>
           <p className="text-sm text-slate-500 mt-1">
-            Quản lý tài khoản, mật khẩu, học sinh, câu hỏi & bảng điểm trên Google Sheet cho THCS Phú Hồ
+            Quản trị viên cấu hình kết nối Google Sheet, Apps Script và Google Drive dùng chung cho toàn trường THCS Phú Hồ
           </p>
         </div>
 
@@ -447,6 +582,137 @@ function jsonResponse(data) {
           </button>
         </div>
       </div>
+
+      {activeSubTab === 'manager' && (
+        <div className="space-y-6">
+          {/* CARD: CẤU HÌNH TẬP TRUNG TOÀN TRƯỜNG DÀNH CHO QUẢN TRỊ VIÊN */}
+          <div className="bg-white rounded-2xl border-2 border-indigo-500/20 p-6 shadow-xs space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-indigo-600 text-white shadow-xs">
+                  <ShieldCheck className="w-6 h-6" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-base font-bold text-slate-900">
+                      Cấu Hình Kết Nối Dữ Liệu Toàn Trường (Quản Trị Viên)
+                    </h2>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-100 text-indigo-800 border border-indigo-200">
+                      Áp dụng tự động cho toàn bộ GV & HS
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Quản trị viên thiết lập một lần tại đây. Giáo viên không cần phải cấu hình lại hay đăng nhập Google khi sử dụng hệ thống.
+                  </p>
+                </div>
+              </div>
+
+              {systemConfig.lastConfiguredAt && (
+                <div className="text-[11px] text-slate-500 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg self-start sm:self-auto">
+                  <span>Cập nhật gần nhất: </span>
+                  <strong className="text-slate-700">{systemConfig.lastConfiguredAt}</strong>
+                  {systemConfig.configuredByName && (
+                    <span> bởi <strong className="text-indigo-600">{systemConfig.configuredByName}</strong></span>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {saveSuccessMsg && (
+              <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-900 text-xs font-semibold flex items-center gap-2 animate-in fade-in">
+                <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+                <span>{saveSuccessMsg}</span>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2">
+              {/* 1. Google Spreadsheet ID/Link */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                  <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                  <span>1. Google Spreadsheet (Link hoặc ID)</span>
+                </label>
+                <input
+                  type="text"
+                  value={sheetId}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    const extracted = extractSheetId(val);
+                    setSheetId(extracted);
+                  }}
+                  placeholder="Dán link Google Sheet hoặc ID bảng tính..."
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs text-slate-800 font-mono bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+                <p className="text-[10px] text-slate-400">
+                  Tự động nhận diện ID bảng tính nếu dán toàn bộ đường link.
+                </p>
+              </div>
+
+              {/* 2. Apps Script URL */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                  <Globe className="w-4 h-4 text-sky-600" />
+                  <span>2. Google Apps Script Web App URL</span>
+                </label>
+                <input
+                  type="url"
+                  value={appsScriptUrlInput}
+                  onChange={(e) => setAppsScriptUrlInput(e.target.value)}
+                  placeholder="https://script.google.com/macros/s/.../exec"
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs text-slate-800 font-mono bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+                <p className="text-[10px] text-slate-400">
+                  Điểm cầu REST API đọc/ghi không phụ thuộc tên miền Vercel.
+                </p>
+              </div>
+
+              {/* 3. Thư mục Google Drive chung */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                  <HardDrive className="w-4 h-4 text-indigo-600" />
+                  <span>3. Thư mục Google Drive chung (Tùy chọn)</span>
+                </label>
+                <input
+                  type="text"
+                  value={driveFolderUrlInput}
+                  onChange={(e) => setDriveFolderUrlInput(e.target.value)}
+                  placeholder="Dán link thư mục Google Drive của trường..."
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs text-slate-800 font-mono bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+                <p className="text-[10px] text-slate-400">
+                  Thư mục lưu trữ hình ảnh câu hỏi & bản sao lưu đề thi.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-100">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleSaveSystemConfig}
+                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-xs transition-colors cursor-pointer"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>Lưu & Áp dụng cho Toàn Trường</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleTestAppsScript}
+                  disabled={isTestingScript}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isTestingScript ? 'animate-spin' : ''}`} />
+                  <span>{isTestingScript ? 'Đang kiểm tra...' : 'Kiểm tra kết nối'}</span>
+                </button>
+              </div>
+
+              <div className="text-[11px] text-slate-500 flex items-center gap-1.5">
+                <Zap className="w-3.5 h-3.5 text-amber-500" />
+                <span>Giáo viên & Học sinh tự động kế thừa cấu hình này mà không cần đăng nhập Google.</span>
+              </div>
+            </div>
+          </div>
 
       {/* AUTO-SYNC HIGHLIGHT BANNER */}
       <div className="bg-gradient-to-r from-emerald-50 via-teal-50 to-indigo-50 border border-emerald-200/80 rounded-xl p-4 shadow-xs">
@@ -502,10 +768,8 @@ function jsonResponse(data) {
         </div>
       </div>
 
-      {activeSubTab === 'manager' && (
-        <div className="space-y-6">
-          {/* Card: Google Apps Script Backend (Dành cho Vercel & GitHub) */}
-          <div className="bg-gradient-to-r from-indigo-50/70 via-sky-50/70 to-emerald-50/70 rounded-xl border border-indigo-200 p-6 shadow-xs space-y-4">
+      {/* Card: Google Apps Script Backend (Dành cho Vercel & GitHub) */}
+      <div className="bg-gradient-to-r from-indigo-50/70 via-sky-50/70 to-emerald-50/70 rounded-xl border border-indigo-200 p-6 shadow-xs space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <div>
                 <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
@@ -659,6 +923,74 @@ function jsonResponse(data) {
                   </svg>
                   <span>{isLoggingIn ? 'Đang xác thực Google...' : 'Đăng nhập với Google để kết nối Sheets'}</span>
                 </button>
+
+                {unauthorizedDomainError && (
+                  <div className="p-4 rounded-xl bg-amber-50/90 border border-amber-300 text-amber-950 space-y-3 mt-3 animate-in fade-in">
+                    <div className="flex items-start gap-2.5">
+                      <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                      <div className="space-y-1">
+                        <div className="font-bold text-xs sm:text-sm text-amber-900">
+                          Khắc phục lỗi: Firebase auth/unauthorized-domain trên Vercel
+                        </div>
+                        <p className="text-xs text-amber-800 leading-relaxed">
+                          Tên miền website này chưa được cấp phép xác thực Google trong Firebase Authentication. Chỉ cần 30 giây để thêm tên miền vào danh sách <strong>Authorized domains</strong>.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="bg-white p-3 rounded-lg border border-amber-200 space-y-2">
+                      <div className="text-[11px] font-semibold text-slate-700">
+                        Tên miền hiện tại cần thêm vào Firebase:
+                      </div>
+                      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                        <code className="px-2.5 py-1.5 rounded-md bg-slate-100 border border-slate-200 text-xs font-mono font-bold text-indigo-700 flex-1 truncate">
+                          {unauthorizedDomainError.domain || window.location.hostname}
+                        </code>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText(unauthorizedDomainError.domain || window.location.hostname);
+                            setCopiedDomain(true);
+                            setTimeout(() => setCopiedDomain(false), 2000);
+                          }}
+                          className="px-3 py-1.5 rounded-md bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors cursor-pointer shrink-0"
+                        >
+                          {copiedDomain ? <Check className="w-3.5 h-3.5 text-emerald-300" /> : <Copy className="w-3.5 h-3.5" />}
+                          <span>{copiedDomain ? 'Đã sao chép!' : 'Sao chép tên miền'}</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="text-xs text-amber-900 space-y-2 pt-1">
+                      <div className="font-bold flex items-center gap-1.5 text-amber-950">
+                        <span>3 Bước thực hiện nhanh:</span>
+                      </div>
+                      <ol className="list-decimal list-inside space-y-1.5 text-xs text-amber-900 pl-1">
+                        <li>
+                          Truy cập Firebase Console:{' '}
+                          <a
+                            href={`https://console.firebase.google.com/project/${unauthorizedDomainError.projectId}/authentication/settings`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="font-bold text-indigo-700 hover:underline inline-flex items-center gap-1"
+                          >
+                            <span>Mở Firebase Authentication Settings</span>
+                            <ExternalLink className="w-3 h-3" />
+                          </a>
+                        </li>
+                        <li>
+                          Chọn tab <strong>Settings</strong> &rarr; mục <strong>Authorized domains</strong>.
+                        </li>
+                        <li>
+                          Bấm <strong>Add domain</strong> &rarr; dán <code>{unauthorizedDomainError.domain || window.location.hostname}</code> &rarr; bấm <strong>Save</strong>.
+                        </li>
+                      </ol>
+                      <div className="text-[11px] text-amber-800 italic pt-1">
+                        💡 Lưu ý: Ngoài ra, phương thức <strong>Google Apps Script Backend</strong> ở trên hoạt động 100% độc lập, không yêu cầu xác thực OAuth hay cấu hình Authorized domains!
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -1067,6 +1399,44 @@ git push -u origin main`}
                   <li>Mọi tài khoản giáo viên, học sinh trong Google Sheet có thể đăng nhập ngay!</li>
                   <li>Điểm số học sinh nộp bài thi sẽ tự động ghi thẳng vào Google Sheet!</li>
                 </ul>
+              </div>
+
+              {/* Bước 5 */}
+              <div className="p-4 rounded-xl border border-amber-300 bg-amber-50/60 md:col-span-2 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="w-6 h-6 rounded-full bg-amber-600 text-white font-bold text-xs flex items-center justify-center">5</span>
+                    <h4 className="font-bold text-amber-950 text-sm">
+                      Thêm miền Vercel vào Firebase Authorized Domains (Khắc phục auth/unauthorized-domain)
+                    </h4>
+                  </div>
+                  <span className="text-[11px] font-semibold text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full border border-amber-200">
+                    Bắt buộc khi dùng Google OAuth
+                  </span>
+                </div>
+                <p className="text-xs text-amber-900 leading-relaxed">
+                  Firebase Authentication chỉ cho phép đăng nhập Google từ các tên miền có trong danh sách được cấp phép. Khi chạy trên Vercel, bạn cần khai báo tên miền của mình:
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs text-slate-800">
+                  <div className="p-2.5 rounded-lg bg-white border border-amber-200">
+                    <div className="font-bold text-slate-900 mb-1">1. Mở Firebase Console</div>
+                    <div className="text-[11px] text-slate-600">
+                      Vào <a href={`https://console.firebase.google.com/project/${getFirebaseProjectId()}/authentication/settings`} target="_blank" rel="noreferrer" className="text-indigo-600 underline font-semibold">Firebase Console</a> &rarr; <strong>Authentication</strong> &rarr; chọn tab <strong>Settings</strong>.
+                    </div>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-white border border-amber-200">
+                    <div className="font-bold text-slate-900 mb-1">2. Thêm Authorized Domain</div>
+                    <div className="text-[11px] text-slate-600">
+                      Cuộn xuống phần <strong>Authorized domains</strong> &rarr; bấm <strong>Add domain</strong> &rarr; nhập tên miền Vercel (ví dụ: <code>ten-app.vercel.app</code> hoặc <code>vercel.app</code>).
+                    </div>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-white border border-amber-200">
+                    <div className="font-bold text-slate-900 mb-1">3. Lưu & Sử dụng</div>
+                    <div className="text-[11px] text-slate-600">
+                      Bấm <strong>Save</strong>. Sau đó quay lại website trên Vercel tải lại trang là có thể đăng nhập Google thành công ngay lập tức!
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>

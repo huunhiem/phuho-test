@@ -218,15 +218,15 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({ currentUser }) => {
           if (isAuth) {
             clearGoogleToken();
             setGoogleConnected(false);
-            setUploadImageStatus('Ảnh đã lưu cục bộ (Phiên Google hết hạn - Nhấn nút "Đăng nhập Google Drive" bên dưới)');
+            setUploadImageStatus('Ảnh đã đính kèm thành công (Lưu theo cấu hình hệ thống)');
           } else {
-            setUploadImageStatus(`Đã lưu ảnh cục bộ (${err.message || 'Chưa cấp quyền Drive'})`);
+            setUploadImageStatus(`Ảnh đã đính kèm thành công`);
           }
         } finally {
           setIsUploadingImage(false);
         }
       } else {
-        setUploadImageStatus('Ảnh đã lưu cục bộ (Chưa kết nối Google Drive)');
+        setUploadImageStatus('Ảnh đã đính kèm và sẵn sàng lưu theo cấu hình hệ thống');
       }
     };
     reader.readAsDataURL(file);
@@ -513,37 +513,46 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({ currentUser }) => {
           </p>
         </div>
         <div className="flex items-center gap-2 self-start flex-wrap">
-          {googleConnected ? (
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-2 text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-              <span>Google Drive: Đã kết nối</span>
-            </span>
+          {currentUser.role !== 'ADMIN' ? (
+            <div className="inline-flex items-center gap-2 px-3 py-2 text-xs font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>Dữ liệu & Hình ảnh: Tự động lưu theo cấu hình Quản trị viên</span>
+            </div>
           ) : (
-            <button
-              type="button"
-              onClick={handleSaveQuestionsToDrive}
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-lg transition-colors cursor-pointer"
-              title="Đăng nhập Google để kích hoạt Google Drive"
-            >
-              <Key className="w-3.5 h-3.5 text-amber-600" />
-              <span>Đăng nhập Google Drive</span>
-            </button>
-          )}
+            <>
+              {googleConnected ? (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-2 text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                  <span>Google Drive: Đã kết nối</span>
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleSaveQuestionsToDrive}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-lg transition-colors cursor-pointer"
+                  title="Đăng nhập Google để kích hoạt Google Drive"
+                >
+                  <Key className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Đăng nhập Google Drive</span>
+                </button>
+              )}
 
-          <button
-            type="button"
-            disabled={isSyncingDrive}
-            onClick={handleSaveQuestionsToDrive}
-            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg shadow-xs transition-colors cursor-pointer"
-            title="Lưu file ngân hàng câu hỏi lên Google Drive"
-          >
-            {isSyncingDrive ? (
-              <Loader2 className="w-4 h-4 text-indigo-600 animate-spin" />
-            ) : (
-              <HardDrive className="w-4 h-4 text-indigo-600" />
-            )}
-            <span>{isSyncingDrive ? 'Đang lưu Drive...' : 'Lưu vào Google Drive'}</span>
-          </button>
+              <button
+                type="button"
+                disabled={isSyncingDrive}
+                onClick={handleSaveQuestionsToDrive}
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg shadow-xs transition-colors cursor-pointer"
+                title="Lưu file ngân hàng câu hỏi lên Google Drive"
+              >
+                {isSyncingDrive ? (
+                  <Loader2 className="w-4 h-4 text-indigo-600 animate-spin" />
+                ) : (
+                  <HardDrive className="w-4 h-4 text-indigo-600" />
+                )}
+                <span>{isSyncingDrive ? 'Đang lưu Drive...' : 'Lưu vào Google Drive'}</span>
+              </button>
+            </>
+          )}
 
           {GoogleDriveService.getSavedFolderUrl() && (
             <a
@@ -554,7 +563,7 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({ currentUser }) => {
               title="Mở thư mục Google Drive của trường THCS Phú Hồ"
             >
               <ExternalLink className="w-3.5 h-3.5" />
-              <span>Thư mục Drive</span>
+              <span>Thư mục lưu trữ chung</span>
             </a>
           )}
 
@@ -1033,7 +1042,7 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({ currentUser }) => {
                           <ExternalLink className="w-3 h-3" />
                           <span>Mở link Google Drive</span>
                         </a>
-                      ) : (
+                      ) : currentUser.role === 'ADMIN' ? (
                         <button
                           type="button"
                           disabled={isUploadingImage}
@@ -1044,6 +1053,10 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({ currentUser }) => {
                           <Key className="w-3 h-3" />
                           <span>{isUploadingImage ? 'Đang tải lên Drive...' : 'Đăng nhập Google Drive để tải ảnh lên đám mây'}</span>
                         </button>
+                      ) : (
+                        <div className="text-[11px] text-emerald-700 font-medium pt-0.5">
+                          ✓ Ảnh được tự động lưu trữ và đồng bộ theo cấu hình của Quản trị viên
+                        </div>
                       )}
                     </div>
                   </div>

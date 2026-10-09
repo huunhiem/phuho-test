@@ -8,16 +8,48 @@ import {
   signOut
 } from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
-import { LMSStorageService, onStorageChange } from './storage';
+import { LMSStorageService } from './storage';
+import { onStorageChange } from './storageEvents';
+import {
+  APPS_SCRIPT_URL_KEY,
+  DEFAULT_APPS_SCRIPT_URL,
+  SHEET_ID_KEY,
+  SYSTEM_CONFIG_KEY,
+  getSavedSheetId,
+  getAppsScriptUrl,
+  saveAppsScriptUrl,
+  extractSheetId,
+  type SystemConnectionConfig
+} from './systemConfig';
+export {
+  APPS_SCRIPT_URL_KEY,
+  DEFAULT_APPS_SCRIPT_URL,
+  SHEET_ID_KEY,
+  SYSTEM_CONFIG_KEY,
+  getSavedSheetId,
+  getAppsScriptUrl,
+  saveAppsScriptUrl,
+  extractSheetId,
+  type SystemConnectionConfig
+};
 import { User, UserRole, Lesson } from '../types';
 import { GoogleDriveService } from './googleDriveService';
 
-// Initialize Firebase
-const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+// Initialize Firebase with support for env variable overrides on Vercel
+const resolvedFirebaseConfig = {
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || firebaseConfig.projectId,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || firebaseConfig.appId,
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || firebaseConfig.apiKey,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || firebaseConfig.authDomain,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || firebaseConfig.storageBucket,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || firebaseConfig.messagingSenderId
+};
+
+const app = getApps().length > 0 ? getApp() : initializeApp(resolvedFirebaseConfig);
 export const auth = getAuth(app);
+export const getFirebaseProjectId = (): string => resolvedFirebaseConfig.projectId || 'gen-lang-client-0926667102';
 
 const TOKEN_KEY = 'phuho_lms_google_access_token';
-const SHEET_ID_KEY = 'phuho_lms_connected_sheet_id';
 const AUTO_SYNC_KEY = 'phuho_lms_auto_sync_enabled';
 
 let cachedAccessToken: string | null = localStorage.getItem(TOKEN_KEY);
@@ -97,6 +129,16 @@ export const initGoogleAuth = (
   });
 };
 
+export const isUnauthorizedDomainError = (errorOrMsg: any): boolean => {
+  const code = errorOrMsg?.code || '';
+  const msg = typeof errorOrMsg === 'string' ? errorOrMsg : errorOrMsg?.message || '';
+  return (
+    code === 'auth/unauthorized-domain' ||
+    msg.includes('auth/unauthorized-domain') ||
+    msg.includes('unauthorized-domain')
+  );
+};
+
 export const signInWithGoogleSheets = async (): Promise<{
   user: FirebaseUser;
   accessToken: string;
@@ -120,6 +162,17 @@ export const signInWithGoogleSheets = async (): Promise<{
     return { user: result.user, accessToken: cachedAccessToken };
   } catch (error: any) {
     console.error('Lỗi đăng nhập Google:', error);
+    if (isUnauthorizedDomainError(error)) {
+      const currentHost = typeof window !== 'undefined' ? window.location.hostname : 'domain của bạn';
+      const projectId = getFirebaseProjectId();
+      const customErr = new Error(
+        `Lỗi tên miền chưa được cấp quyền (auth/unauthorized-domain): Tên miền "${currentHost}" chưa được khai báo trong danh sách Authorized domains của Firebase. Vui lòng vào Firebase Console > Authentication > Settings > Authorized domains và thêm "${currentHost}".`
+      );
+      (customErr as any).code = 'auth/unauthorized-domain';
+      (customErr as any).domain = currentHost;
+      (customErr as any).projectId = projectId;
+      throw customErr;
+    }
     throw error;
   } finally {
     isSigningIn = false;
@@ -149,6 +202,7 @@ export const isAuthErrorMessage = (errorOrMsg: any): boolean => {
     lower.includes('invalid credentials') ||
     lower.includes('insufficient authentication scopes') ||
     lower.includes('token expired') ||
+    lower.includes('unauthorized-domain') ||
     lower.includes('401')
   );
 };
@@ -158,28 +212,6 @@ export const logoutGoogle = async () => {
   clearGoogleToken();
 };
 
-export const getSavedSheetId = (): string => {
-  return localStorage.getItem(SHEET_ID_KEY) || '';
-};
-
-export const APPS_SCRIPT_URL_KEY = 'phuho_lms_apps_script_url';
-export const DEFAULT_APPS_SCRIPT_URL =
-  'https://script.google.com/macros/s/AKfycbx3p_wb8t8BWTx0ZqK6coG2icwx77N-cD4YfNoFVUd-n_yqO_BWVhCOdGmMoaCUvOSMjw/exec';
-
-export const getAppsScriptUrl = (): string => {
-  const local = localStorage.getItem(APPS_SCRIPT_URL_KEY);
-  if (local && local.trim()) return local.trim();
-  const envScript = (import.meta as any).env?.VITE_APPS_SCRIPT_URL;
-  if (envScript && envScript.trim()) return envScript.trim();
-  const envAppUrl = (import.meta as any).env?.VITE_APP_URL || (import.meta as any).env?.APP_URL;
-  if (envAppUrl && String(envAppUrl).includes('script.google.com')) return String(envAppUrl).trim();
-  return DEFAULT_APPS_SCRIPT_URL;
-};
-
-export const saveAppsScriptUrl = (url: string): void => {
-  localStorage.setItem(APPS_SCRIPT_URL_KEY, url.trim());
-};
-
 export const saveSheetId = (sheetId: string): void => {
   localStorage.setItem(SHEET_ID_KEY, sheetId.trim());
   if (cachedAccessToken && sheetId.trim()) {
@@ -187,6 +219,91 @@ export const saveSheetId = (sheetId: string): void => {
   } else {
     notifyAutoSyncListeners({ status: 'disconnected' });
   }
+};
+
+/**
+ * Lấy cấu hình kết nối dữ liệu dùng chung toàn hệ thống do Quản trị viên thiết lập
+ */
+export const getSystemConnectionConfig = (): SystemConnectionConfig => {
+  try {
+    const raw = localStorage.getItem(SYSTEM_CONFIG_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return {
+        sheetId: parsed.sheetId || getSavedSheetId(),
+        sheetUrl: parsed.sheetUrl || (parsed.sheetId ? `https://docs.google.com/spreadsheets/d/${parsed.sheetId}` : ''),
+        appsScriptUrl: parsed.appsScriptUrl || getAppsScriptUrl(),
+        driveFolderId: parsed.driveFolderId || localStorage.getItem('phuho_lms_drive_folder_id') || '',
+        driveFolderUrl: parsed.driveFolderUrl || localStorage.getItem('phuho_lms_drive_folder_url') || '',
+        autoSyncEnabled: parsed.autoSyncEnabled ?? true,
+        configuredByAdmin: parsed.configuredByAdmin ?? Boolean(localStorage.getItem(SHEET_ID_KEY) || localStorage.getItem(APPS_SCRIPT_URL_KEY)),
+        lastConfiguredAt: parsed.lastConfiguredAt || '',
+        configuredByName: parsed.configuredByName || 'Quản trị viên Hệ thống'
+      };
+    }
+  } catch (e) {
+    console.error('Lỗi đọc system connection config:', e);
+  }
+
+  const currentSheetId = getSavedSheetId();
+  const currentScriptUrl = getAppsScriptUrl();
+  return {
+    sheetId: currentSheetId,
+    sheetUrl: currentSheetId ? `https://docs.google.com/spreadsheets/d/${currentSheetId}` : '',
+    appsScriptUrl: currentScriptUrl,
+    driveFolderId: localStorage.getItem('phuho_lms_drive_folder_id') || '',
+    driveFolderUrl: localStorage.getItem('phuho_lms_drive_folder_url') || '',
+    autoSyncEnabled: true,
+    configuredByAdmin: Boolean(currentSheetId || localStorage.getItem(APPS_SCRIPT_URL_KEY)),
+    lastConfiguredAt: new Date().toLocaleDateString('vi-VN'),
+    configuredByName: 'Quản trị viên Hệ thống'
+  };
+};
+
+/**
+ * Quản trị viên lưu cấu hình kết nối dữ liệu áp dụng cho toàn bộ Giáo viên & Học sinh
+ */
+export const saveSystemConnectionConfig = (
+  updates: Partial<SystemConnectionConfig>,
+  adminName: string = 'Quản trị viên'
+): SystemConnectionConfig => {
+  const current = getSystemConnectionConfig();
+  const cleanSheetId = updates.sheetId !== undefined ? extractSheetId(updates.sheetId) : current.sheetId;
+  const cleanScriptUrl = updates.appsScriptUrl !== undefined ? updates.appsScriptUrl.trim() : current.appsScriptUrl;
+  const cleanFolderUrl = updates.driveFolderUrl !== undefined ? updates.driveFolderUrl.trim() : current.driveFolderUrl;
+
+  let folderId = updates.driveFolderId || current.driveFolderId || '';
+  if (cleanFolderUrl && (!folderId || updates.driveFolderUrl)) {
+    const fMatch = cleanFolderUrl.match(/\/folders\/([a-zA-Z0-9-_]+)/);
+    if (fMatch && fMatch[1]) folderId = fMatch[1];
+  }
+
+  const newConfig: SystemConnectionConfig = {
+    ...current,
+    ...updates,
+    sheetId: cleanSheetId,
+    sheetUrl: cleanSheetId ? `https://docs.google.com/spreadsheets/d/${cleanSheetId}` : '',
+    appsScriptUrl: cleanScriptUrl,
+    driveFolderId: folderId,
+    driveFolderUrl: cleanFolderUrl,
+    configuredByAdmin: true,
+    lastConfiguredAt: new Date().toLocaleString('vi-VN'),
+    configuredByName: adminName
+  };
+
+  localStorage.setItem(SYSTEM_CONFIG_KEY, JSON.stringify(newConfig));
+  if (cleanSheetId) localStorage.setItem(SHEET_ID_KEY, cleanSheetId);
+  if (cleanScriptUrl) localStorage.setItem(APPS_SCRIPT_URL_KEY, cleanScriptUrl);
+  if (folderId) localStorage.setItem('phuho_lms_drive_folder_id', folderId);
+  if (cleanFolderUrl) localStorage.setItem('phuho_lms_drive_folder_url', cleanFolderUrl);
+
+  notifyAutoSyncListeners({
+    status: 'synced',
+    lastSyncedTime: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
+    entity: 'Cấu hình toàn trường đã cập nhật'
+  });
+
+  return newConfig;
 };
 
 export const REQUIRED_SHEETS = [

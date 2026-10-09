@@ -43,26 +43,13 @@ const STORAGE_KEYS = {
   CURRENT_USER: 'phuho_lms_current_user'
 };
 
-export type StorageEntity = 'classes' | 'users' | 'questions' | 'tests' | 'assignments' | 'submissions' | 'lessons' | 'all';
-type StorageChangeListener = (entity: StorageEntity) => void;
-const changeListeners: Set<StorageChangeListener> = new Set();
-
-export function onStorageChange(listener: StorageChangeListener): () => void {
-  changeListeners.add(listener);
-  return () => {
-    changeListeners.delete(listener);
-  };
-}
-
-function notifyChange(entity: StorageEntity) {
-  changeListeners.forEach((fn) => {
-    try {
-      fn(entity);
-    } catch (e) {
-      console.warn('Storage change listener error:', e);
-    }
-  });
-}
+export {
+  onStorageChange,
+  notifyChange,
+  type StorageEntity,
+  type StorageChangeListener
+} from './storageEvents';
+import { notifyChange } from './storageEvents';
 
 function getStored<T>(key: string, defaultValue: T): T {
   try {

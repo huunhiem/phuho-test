@@ -180,7 +180,7 @@ export default function App() {
         case 'question_analysis':
           return <QuestionAnalysis />;
         case 'google_sheets':
-          return <GoogleSheetManager />;
+          return <GoogleSheetManager currentUser={currentUser} />;
         default:
           return <PrincipalView />;
       }
@@ -197,7 +197,7 @@ export default function App() {
         case 'admin_classes':
           return <ClassManagement />;
         case 'google_sheets':
-          return <GoogleSheetManager />;
+          return <GoogleSheetManager currentUser={currentUser} />;
         case 'firebase_guide':
           return <FirebaseConfigGuide />;
         case 'question_bank':
@@ -236,7 +236,7 @@ export default function App() {
       case 'question_analysis':
         return <QuestionAnalysis />;
       case 'google_sheets':
-        return <GoogleSheetManager />;
+        return <GoogleSheetManager currentUser={currentUser} />;
       default:
         return <TeacherDashboard currentUser={currentUser} onNavigate={setActiveTab} />;
     }

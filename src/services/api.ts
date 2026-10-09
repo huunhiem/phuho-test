@@ -1,4 +1,4 @@
-const API_URL = import.meta.env.VITE_APPS_SCRIPT_URL;
+import { getAppsScriptUrl } from './systemConfig';
 
 export interface ApiResponse<T = any> {
   success: boolean;
@@ -13,8 +13,9 @@ async function request<T = any>(
   method: 'GET' | 'POST' = 'GET',
   payload: Record<string, any> = {}
 ): Promise<ApiResponse<T>> {
-  if (!API_URL) {
-    throw new Error('Chưa cấu hình VITE_APPS_SCRIPT_URL trên Vercel.');
+  const apiUrl = getAppsScriptUrl();
+  if (!apiUrl) {
+    throw new Error('Hệ thống chưa được Quản trị viên cấu hình URL kết nối.');
   }
 
   let response: Response;
@@ -28,12 +29,12 @@ async function request<T = any>(
       }
     });
 
-    response = await fetch(`${API_URL}?${params.toString()}`, {
+    response = await fetch(`${apiUrl}?${params.toString()}`, {
       method: 'GET',
       redirect: 'follow',
     });
   } else {
-    response = await fetch(API_URL, {
+    response = await fetch(apiUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'text/plain;charset=utf-8',

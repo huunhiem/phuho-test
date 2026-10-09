@@ -514,4 +514,12 @@ export class GoogleDriveService {
   static getSavedQuestionsDriveUrl(): string {
     return localStorage.getItem(QUESTIONS_FILE_URL_KEY) || '';
   }
+
+  /**
+   * Quản trị viên lưu thông tin thư mục Google Drive dùng chung
+   */
+  static saveFolder(folderId: string, folderUrl: string): void {
+    if (folderId) localStorage.setItem(FOLDER_ID_KEY, folderId.trim());
+    if (folderUrl) localStorage.setItem(FOLDER_URL_KEY, folderUrl.trim());
+  }
 }
