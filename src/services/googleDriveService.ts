@@ -5,7 +5,12 @@ import {
   isAuthErrorMessage,
   signInWithGoogleSheets
 } from './googleSheetsService';
-import { getAppsScriptUrl } from './systemConfig';
+import {
+  getAppsScriptUrl,
+  getSavedDriveFolderId,
+  getSavedSheetId,
+  getSavedDriveFolderUrl
+} from './systemConfig';
 
 const FOLDER_ID_KEY = 'phuho_lms_drive_folder_id';
 const FOLDER_URL_KEY = 'phuho_lms_drive_folder_url';
@@ -328,7 +333,8 @@ export class GoogleDriveService {
       });
     }
 
-    const folderId = localStorage.getItem(FOLDER_ID_KEY) || '';
+    const folderId = getSavedDriveFolderId();
+    const sheetId = getSavedSheetId();
 
     try {
       const res = await fetch(scriptUrl, {
@@ -341,7 +347,8 @@ export class GoogleDriveService {
           fileName: fileName || `cau_hoi_${Date.now()}.png`,
           mimeType,
           base64,
-          folderId
+          folderId,
+          sheetId
         })
       });
 
@@ -373,7 +380,8 @@ export class GoogleDriveService {
           action: 'uploadImage',
           fileName: fileName || `cau_hoi_${Date.now()}.png`,
           base64,
-          folderId
+          folderId,
+          sheetId
         })
       });
     } catch (ignore) {}
@@ -382,7 +390,7 @@ export class GoogleDriveService {
     return {
       fileId: generatedId,
       name: fileName,
-      viewLink: `https://drive.google.com/drive/folders/${folderId || 'root'}`,
+      viewLink: getSavedDriveFolderUrl(),
       displayUrl: typeof fileOrDataUrl === 'string' ? fileOrDataUrl : base64
     };
   }
@@ -393,7 +401,8 @@ export class GoogleDriveService {
   static async saveQuestionsToDriveViaAppsScript(questions: Question[]): Promise<boolean> {
     const scriptUrl = getAppsScriptUrl();
     if (!scriptUrl) return false;
-    const folderId = localStorage.getItem(FOLDER_ID_KEY) || '';
+    const folderId = getSavedDriveFolderId();
+    const sheetId = getSavedSheetId();
     try {
       await fetch(scriptUrl, {
         method: 'POST',
@@ -404,7 +413,8 @@ export class GoogleDriveService {
         body: JSON.stringify({
           action: 'saveQuestionsToDrive',
           questionsJson: questions,
-          folderId
+          folderId,
+          sheetId
         })
       });
       return true;

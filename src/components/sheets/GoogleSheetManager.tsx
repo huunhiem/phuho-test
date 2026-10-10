@@ -45,7 +45,8 @@ import {
   getSystemConnectionConfig,
   saveSystemConnectionConfig,
   SystemConnectionConfig,
-  extractSheetId
+  extractSheetId,
+  isSystemConnected
 } from '../../services/googleSheetsService';
 import { GoogleDriveService } from '../../services/googleDriveService';
 import { LMSStorageService } from '../../services/storage';
@@ -71,6 +72,8 @@ export const GoogleSheetManager: React.FC<GoogleSheetManagerProps> = ({ currentU
   const [systemConfig, setSystemConfig] = useState<SystemConnectionConfig>(() => getSystemConnectionConfig());
   const [driveFolderUrlInput, setDriveFolderUrlInput] = useState(() => GoogleDriveService.getSavedFolderUrl());
   const [saveSuccessMsg, setSaveSuccessMsg] = useState<string>('');
+  const [isUpdatingConfig, setIsUpdatingConfig] = useState(false);
+  const [configNotice, setConfigNotice] = useState<{ type: 'success' | 'warning' | 'error'; message: string } | null>(null);
 
   // Apps Script Backend State
   const [appsScriptUrlInput, setAppsScriptUrlInput] = useState(getAppsScriptUrl());
@@ -266,28 +269,66 @@ export const GoogleSheetManager: React.FC<GoogleSheetManagerProps> = ({ currentU
     setScriptTestResult({ success: true, message: 'Đã lưu cấu hình Google Apps Script URL thành công!' });
   };
 
-  const handleSaveSystemConfig = () => {
-    const updated = saveSystemConnectionConfig(
-      {
-        sheetId: sheetId,
-        appsScriptUrl: appsScriptUrlInput,
-        driveFolderUrl: driveFolderUrlInput,
-        autoSyncEnabled: autoSync
-      },
-      currentUser?.fullName || 'Quản trị viên Hệ thống'
-    );
-    setSystemConfig(updated);
-    setSheetId(updated.sheetId);
-    setAppsScriptUrlInput(updated.appsScriptUrl);
-    setDriveFolderUrlInput(updated.driveFolderUrl || '');
-    setSaveSuccessMsg('✓ Đã lưu và áp dụng cấu hình kết nối dữ liệu thành công cho toàn bộ Giáo viên & Học sinh trong trường!');
-    setTimeout(() => setSaveSuccessMsg(''), 5000);
+  const handleSaveSystemConfig = async () => {
+    setIsUpdatingConfig(true);
+    setConfigNotice(null);
+    setSaveSuccessMsg('');
+    try {
+      const updated = saveSystemConnectionConfig(
+        {
+          sheetId: sheetId,
+          appsScriptUrl: appsScriptUrlInput,
+          driveFolderUrl: driveFolderUrlInput,
+          autoSyncEnabled: autoSync
+        },
+        currentUser?.fullName || 'Quản trị viên Hệ thống'
+      );
+      setSystemConfig(updated);
+      setSheetId(updated.sheetId);
+      setAppsScriptUrlInput(updated.appsScriptUrl);
+      setDriveFolderUrlInput(updated.driveFolderUrl || '');
 
-    // Kích hoạt đồng bộ nền ngay lập tức để nạp toàn bộ câu hỏi và dữ liệu về hệ thống
-    if (updated.appsScriptUrl) {
-      GoogleSheetsService.syncFromAppsScript().catch((err) => {
-        console.warn('Lỗi đồng bộ tự động sau khi lưu cấu hình:', err);
+      let qCount = 0;
+      let supportsSaveQ = true;
+      if (updated.appsScriptUrl) {
+        // 1. Kiểm tra kết nối và tính năng ghi của Apps Script
+        const testRes = await GoogleSheetsService.testAppsScriptConnection();
+        supportsSaveQ = Boolean(testRes.supportsSaveQuestion);
+        
+        // 2. Tải toàn bộ câu hỏi từ Google Sheet về máy ngay lập tức
+        const qRes = await GoogleSheetsService.pullQuestionsFromAppsScript();
+        if (qRes.success) {
+          qCount = qRes.count;
+        }
+
+        // 3. Đồng bộ danh sách tài khoản và lớp học trong nền
+        GoogleSheetsService.syncFromAppsScript().catch((err) => {
+          console.warn('Lỗi đồng bộ nền:', err);
+        });
+      }
+
+      const successText = `✓ ĐÃ CẬP NHẬT VÀ LƯU TOÀN BỘ CẤU HÌNH THÀNH CÔNG! Đã nạp ${qCount || 'toàn bộ'} câu hỏi từ Google Sheet & Drive. Cấu hình có hiệu lực vĩnh viễn, Giáo viên và Học sinh không cần kết nối lại sau mỗi lần đăng nhập.`;
+      setSaveSuccessMsg(successText);
+
+      if (!supportsSaveQ) {
+        setConfigNotice({
+          type: 'warning',
+          message: `Lưu ý: URL Apps Script hiện tại đang chạy bản cũ (chưa hỗ trợ ghi câu hỏi tự động). Vui lòng sao chép toàn bộ mã mới bên dưới và Triển khai lại phiên bản mới để tự động ghi câu hỏi vào sheet CauHoi.`
+        });
+      } else {
+        setConfigNotice({
+          type: 'success',
+          message: successText
+        });
+      }
+      setTimeout(() => setSaveSuccessMsg(''), 10000);
+    } catch (e: any) {
+      setConfigNotice({
+        type: 'error',
+        message: `Lỗi cập nhật cấu hình: ${e.message || String(e)}`
       });
+    } finally {
+      setIsUpdatingConfig(false);
     }
   };
 
@@ -800,16 +841,17 @@ function jsonResponse(data) {
                   <ShieldCheck className="w-6 h-6" />
                 </div>
                 <div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <h2 className="text-base font-bold text-slate-900">
-                      Cấu Hình Kết Nối Dữ Liệu Toàn Trường (Quản Trị Viên)
+                      Cấu Hình Kết Nối Dữ Liệu Hệ Thống (Thiết Lập 1 Lần)
                     </h2>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-100 text-indigo-800 border border-indigo-200">
-                      Áp dụng tự động cho toàn bộ GV & HS
+                    <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1">
+                      <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                      ĐÃ KẾT NỐI HỆ THỐNG VĨNH VIỄN
                     </span>
                   </div>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    Quản trị viên thiết lập một lần tại đây. Giáo viên không cần phải cấu hình lại hay đăng nhập Google khi sử dụng hệ thống.
+                    Quản trị viên cấu hình kết nối 1 lần duy nhất tại đây. Hệ thống lưu vĩnh viễn cho toàn bộ Giáo viên & Học sinh, không yêu cầu kết nối lại sau mỗi lần đăng nhập.
                   </p>
                 </div>
               </div>
@@ -825,7 +867,35 @@ function jsonResponse(data) {
               )}
             </div>
 
-            {saveSuccessMsg && (
+            {configNotice && (
+              <div
+                className={`p-3.5 rounded-xl border text-xs font-semibold flex items-start gap-2.5 animate-in fade-in ${
+                  configNotice.type === 'success'
+                    ? 'bg-emerald-50 border-emerald-300 text-emerald-900'
+                    : configNotice.type === 'warning'
+                    ? 'bg-amber-50 border-amber-300 text-amber-900'
+                    : 'bg-rose-50 border-rose-300 text-rose-900'
+                }`}
+              >
+                {configNotice.type === 'success' ? (
+                  <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+                ) : configNotice.type === 'warning' ? (
+                  <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                ) : (
+                  <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+                )}
+                <div className="space-y-1">
+                  <div>{configNotice.message}</div>
+                  {configNotice.type === 'warning' && (
+                    <div className="text-[11px] text-amber-800 pt-1">
+                      💡 Mẹo: Bấm nút <strong>"Sao chép toàn bộ mã Google Apps Script"</strong> ở góc dưới để cập nhật nhanh bản triển khai Web App.
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {saveSuccessMsg && !configNotice && (
               <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-900 text-xs font-semibold flex items-center gap-2 animate-in fade-in">
                 <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
                 <span>{saveSuccessMsg}</span>
@@ -893,14 +963,15 @@ function jsonResponse(data) {
             </div>
 
             <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-100">
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
                   onClick={handleSaveSystemConfig}
-                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-xs transition-colors cursor-pointer"
+                  disabled={isUpdatingConfig}
+                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-xs transition-colors cursor-pointer disabled:opacity-50"
                 >
-                  <Check className="w-4 h-4" />
-                  <span>Lưu & Áp dụng cho Toàn Trường</span>
+                  <RefreshCw className={`w-4 h-4 ${isUpdatingConfig ? 'animate-spin' : ''}`} />
+                  <span>{isUpdatingConfig ? 'Đang cập nhật...' : 'CẬP NHẬT CẤU HÌNH HỆ THỐNG'}</span>
                 </button>
 
                 <button
@@ -934,11 +1005,12 @@ function jsonResponse(data) {
                   Chế độ Tự Động Cập Nhật (Realtime Auto-Sync):
                 </h3>
                 <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold ${
-                  autoSync && accessToken && sheetId
+                  autoSync && (isSystemConnected() || (accessToken && sheetId))
                     ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
                     : 'bg-amber-100 text-amber-800 border border-amber-200'
                 }`}>
-                  {autoSync && accessToken && sheetId ? 'Đang hoạt động' : 'Cần kết nối Google Sheet'}
+                  <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                  {autoSync && (isSystemConnected() || (accessToken && sheetId)) ? 'Đang hoạt động (Đã kết nối Hệ thống)' : 'Chưa kích hoạt'}
                 </span>
               </div>
               <p className="text-xs text-slate-600 mt-0.5">

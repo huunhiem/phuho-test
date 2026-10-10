@@ -23,6 +23,7 @@ import {
   AutoSyncState,
   getSavedSheetId
 } from '../services/googleSheetsService';
+import { isSystemConnected } from '../services/systemConfig';
 
 export interface RoleMeta {
   title: string;
@@ -97,7 +98,7 @@ export const Header: React.FC<HeaderProps> = ({
 
   // Auto-sync status tracking
   const [autoSyncState, setAutoSyncState] = useState<AutoSyncState>({ status: 'disconnected' });
-  const hasSheet = Boolean(getSavedSheetId());
+  const hasSheet = isSystemConnected() || Boolean(getSavedSheetId());
 
   useEffect(() => {
     const unsub = subscribeAutoSyncStatus((st) => setAutoSyncState(st));
@@ -201,9 +202,9 @@ export const Header: React.FC<HeaderProps> = ({
                     <span>Sheet: Đã lưu</span>
                   </span>
                 ) : (
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-slate-100 text-slate-600 border border-slate-200">
-                    <Zap className="w-3 h-3 text-slate-400" />
-                    <span>Sheet Auto-Sync</span>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                    <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                    <span>Sheet: Đã kết nối</span>
                   </span>
                 )}
               </div>

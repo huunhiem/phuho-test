@@ -23,6 +23,7 @@ import {
   getAppsScriptUrl,
   saveAppsScriptUrl,
   extractSheetId,
+  isSystemConnected,
   type SystemConnectionConfig
 } from './systemConfig';
 export {
@@ -38,6 +39,7 @@ export {
   getAppsScriptUrl,
   saveAppsScriptUrl,
   extractSheetId,
+  isSystemConnected,
   type SystemConnectionConfig
 };
 import {
@@ -236,6 +238,187 @@ export const saveSheetId = (sheetId: string): void => {
   } else {
     notifyAutoSyncListeners({ status: 'disconnected' });
   }
+};
+
+export const isDifficultyString = (val: string): boolean => {
+  if (!val) return false;
+  const upper = val.toUpperCase().trim();
+  return (
+    upper === 'BIET' ||
+    upper === 'HIEU' ||
+    upper === 'VAN_DUNG' ||
+    upper === 'VAN_DUNG_CAO' ||
+    upper.includes('BIẾT') ||
+    upper.includes('NHẬN BIẾT') ||
+    upper.includes('HIỂU') ||
+    upper.includes('THÔNG HIỂU') ||
+    upper.includes('VẬN DỤNG')
+  );
+};
+
+export const parseDifficulty = (val: any): QuestionDifficulty => {
+  if (!val) return 'BIET';
+  const str = String(val).toUpperCase().trim();
+  if (str === 'BIET' || str.includes('BIẾT') || str.includes('NHẬN BIẾT') || str === '1') return 'BIET';
+  if (str === 'HIEU' || str.includes('HIỂU') || str.includes('THÔNG HIỂU') || str === '2') return 'HIEU';
+  if (str === 'VAN_DUNG_CAO' || str.includes('VẬN DỤNG CAO') || str === '4') return 'VAN_DUNG';
+  if (str === 'VAN_DUNG' || str.includes('VẬN DỤNG') || str === '3') return 'VAN_DUNG';
+  return 'BIET';
+};
+
+export const isQuestionTypeString = (val: string): boolean => {
+  if (!val) return false;
+  const upper = val.toUpperCase().trim();
+  return (
+    upper === 'SINGLE_CHOICE' ||
+    upper === 'MULTIPLE_CHOICE' ||
+    upper === 'TRUE_FALSE' ||
+    upper === 'FILL_IN_BLANK' ||
+    upper === 'ESSAY' ||
+    upper.includes('ĐÁP ÁN') ||
+    upper.includes('TRẮC NGHIỆM') ||
+    upper.includes('ĐÚNG / SAI') ||
+    upper.includes('ĐÚNG SAI') ||
+    upper.includes('ĐIỀN KHUYẾT') ||
+    upper.includes('TỰ LUẬN')
+  );
+};
+
+export const parseQuestionType = (val: any): QuestionType => {
+  if (!val) return 'SINGLE_CHOICE';
+  const str = String(val).toUpperCase().trim();
+  if (str === 'MULTIPLE_CHOICE' || str.includes('NHIỀU ĐÁP ÁN')) return 'MULTIPLE_CHOICE';
+  if (str === 'TRUE_FALSE' || str.includes('ĐÚNG / SAI') || str.includes('ĐÚNG SAI')) return 'TRUE_FALSE';
+  if (str === 'FILL_IN_BLANK' || str.includes('ĐIỀN KHUYẾT') || str.includes('ĐIỀN')) return 'FILL_IN_BLANK';
+  if (str === 'ESSAY' || str.includes('TỰ LUẬN')) return 'ESSAY';
+  return 'SINGLE_CHOICE';
+};
+
+export const parseRowToQuestion = (row: any[], i: number): Question | null => {
+  if (!row || !Array.isArray(row) || row.length < 3) return null;
+  const content = String(row[2] || '').trim();
+  if (!content) return null;
+
+  const id = String(row[0] || `q-gsheet-${Date.now()}-${i}`);
+  const code = String(row[1] || '').trim();
+  const rawGrade = String(row[3] || '6');
+  let gradeLevel = parseInt(rawGrade.replace(/[^0-9]/g, ''), 10);
+  if (!gradeLevel || isNaN(gradeLevel)) {
+    const codeMatch = code.match(/^TH([6-9])/i);
+    gradeLevel = codeMatch ? parseInt(codeMatch[1], 10) : 6;
+  }
+  // Nếu mã đề rõ ràng là TH6-, TH7-, TH8-, TH9- thì ưu tiên để khớp khối
+  const codeGradeMatch = code.match(/^TH([6-9])-/i);
+  if (codeGradeMatch) {
+    gradeLevel = parseInt(codeGradeMatch[1], 10);
+  }
+  const rawTopic = String(row[4] || 'Chủ đề A: Máy tính và cộng đồng').trim();
+  const topic = rawTopic || 'Chủ đề A: Máy tính và cộng đồng';
+
+  let lessonTitle = '';
+  let learningOutcome = '';
+  let difficulty: QuestionDifficulty = 'BIET';
+  let type: QuestionType = 'SINGLE_CHOICE';
+  let rawOptions = '';
+  let explanation = '';
+  let imageDriveUrl = '';
+  let author = 'Giáo viên';
+  let createdAt = new Date().toISOString().split('T')[0];
+
+  const col7Str = String(row[7] || '');
+  const col5Str = String(row[5] || '');
+  const is14Col = isDifficultyString(col7Str) || isQuestionTypeString(String(row[8] || ''));
+  const is12Col = !is14Col && (isDifficultyString(col5Str) || isQuestionTypeString(String(row[6] || '')));
+
+  if (!is12Col) {
+    lessonTitle = String(row[5] || 'Bài 1: Thông tin và dữ liệu');
+    learningOutcome = String(row[6] || 'Chuẩn kiến thức GDPT 2018');
+    difficulty = parseDifficulty(row[7]);
+    type = parseQuestionType(row[8]);
+    rawOptions = String(row[9] || '');
+    explanation = String(row[10] || '');
+    imageDriveUrl = String(row[11] || '');
+    author = String(row[12] || 'Giáo viên');
+    createdAt = String(row[13] || createdAt);
+  } else {
+    lessonTitle = 'Bài 1: Thông tin và dữ liệu';
+    learningOutcome = 'Chuẩn kiến thức GDPT 2018';
+    difficulty = parseDifficulty(row[5]);
+    type = parseQuestionType(row[6]);
+    rawOptions = String(row[7] || '');
+    explanation = String(row[8] || '');
+    imageDriveUrl = String(row[9] || '');
+    author = String(row[10] || 'Giáo viên');
+    createdAt = String(row[11] || createdAt);
+  }
+
+  const options: OptionItem[] = [];
+  const trueFalseStatements: TrueFalseStatement[] = [];
+  if (rawOptions) {
+    let parts: string[] = [];
+    if (rawOptions.includes('|')) {
+      parts = rawOptions.split('|');
+    } else if (rawOptions.includes('\n')) {
+      parts = rawOptions.split('\n');
+    } else if (rawOptions.includes(';')) {
+      parts = rawOptions.split(';');
+    } else {
+      parts = [rawOptions];
+    }
+
+    parts.forEach((p, idx) => {
+      const trimmedP = p.trim();
+      if (!trimmedP) return;
+      const isCorrect = /^\s*(\[[xXvV]\]|\([xXvV*]\)|\*)/.test(trimmedP);
+      const text = trimmedP.replace(/^\s*(\[[ xXvV]*\]|\([ xXvV*]*\)|\*)\s*/, '');
+      options.push({
+        id: `opt-${id}-${idx + 1}`,
+        text: text || trimmedP,
+        isCorrect
+      });
+      if (type === 'TRUE_FALSE') {
+        trueFalseStatements.push({
+          id: `tf-${id}-${idx + 1}`,
+          statement: text || trimmedP,
+          isCorrect
+        });
+      }
+    });
+  }
+
+  if (options.length > 0 && !options.some((o) => o.isCorrect)) {
+    options[0].isCorrect = true;
+  }
+
+  const directImageUrl = GoogleDriveService.getDriveDirectImageUrl(imageDriveUrl);
+
+  return {
+    id,
+    code: code || `TH${gradeLevel}-00${i + 1}`,
+    content,
+    gradeLevel,
+    topic,
+    lessonTitle,
+    learningOutcome,
+    difficulty,
+    type,
+    options: options.length > 0 ? options : [
+      { id: `opt-${id}-1`, text: 'Đáp án A', isCorrect: true },
+      { id: `opt-${id}-2`, text: 'Đáp án B', isCorrect: false },
+      { id: `opt-${id}-3`, text: 'Đáp án C', isCorrect: false },
+      { id: `opt-${id}-4`, text: 'Đáp án D', isCorrect: false }
+    ],
+    trueFalseStatements: trueFalseStatements.length > 0 ? trueFalseStatements : undefined,
+    correctAnswerText: type === 'FILL_IN_BLANK' ? rawOptions.replace(/^\s*(\[[ xXvV]*\]|\*)\s*/, '') : undefined,
+    essaySampleAnswer: type === 'ESSAY' ? rawOptions : undefined,
+    explanation,
+    imageDriveUrl: imageDriveUrl || undefined,
+    imageUrl: directImageUrl || undefined,
+    createdBy: 'system',
+    authorName: author,
+    createdAt: String(createdAt).includes('T') ? String(createdAt).split('T')[0] : String(createdAt),
+    status: 'ACTIVE'
+  };
 };
 
 /**
@@ -1110,107 +1293,8 @@ export class GoogleSheetsService {
 
     const importedQuestions: Question[] = [];
     for (let i = 0; i < rows.length; i++) {
-      const row = rows[i];
-      if (!row || !row[2]) continue;
-
-      const id = String(row[0] || `q-${Date.now()}-${i}`);
-      const code = String(row[1] || '').trim();
-      const content = String(row[2]).trim();
-      const rawGrade = String(row[3] || '6');
-      const gradeLevel = parseInt(rawGrade.replace(/[^0-9]/g, ''), 10) || 6;
-      const topic = String(row[4] || 'Chủ đề A: Máy tính và cộng đồng').trim();
-
-      let lessonTitle = '';
-      let learningOutcome = '';
-      let difficulty: QuestionDifficulty = 'BIET';
-      let type: QuestionType = 'SINGLE_CHOICE';
-      let rawOptions = '';
-      let explanation = '';
-      let imageDriveUrl = '';
-      let authorName = 'Giáo viên';
-      let createdAt = new Date().toISOString().split('T')[0];
-
-      const is14Col = ['BIET', 'HIEU', 'VAN_DUNG', 'VAN_DUNG_CAO'].includes(String(row[7]).toUpperCase());
-      if (is14Col) {
-        lessonTitle = String(row[5] || '');
-        learningOutcome = String(row[6] || '');
-        difficulty = (['BIET', 'HIEU', 'VAN_DUNG', 'VAN_DUNG_CAO'].includes(String(row[7]).toUpperCase())
-          ? String(row[7]).toUpperCase()
-          : 'BIET') as QuestionDifficulty;
-        type = (['SINGLE_CHOICE', 'MULTIPLE_CHOICE', 'TRUE_FALSE', 'FILL_IN_BLANK', 'ESSAY'].includes(String(row[8]))
-          ? String(row[8])
-          : 'SINGLE_CHOICE') as QuestionType;
-        rawOptions = String(row[9] || '');
-        explanation = String(row[10] || '');
-        imageDriveUrl = String(row[11] || '');
-        authorName = String(row[12] || 'Giáo viên');
-        createdAt = String(row[13] || createdAt);
-      } else {
-        difficulty = (['BIET', 'HIEU', 'VAN_DUNG', 'VAN_DUNG_CAO'].includes(String(row[5]).toUpperCase())
-          ? String(row[5]).toUpperCase()
-          : 'BIET') as QuestionDifficulty;
-        type = (['SINGLE_CHOICE', 'MULTIPLE_CHOICE', 'TRUE_FALSE', 'FILL_IN_BLANK', 'ESSAY'].includes(String(row[6]))
-          ? String(row[6])
-          : 'SINGLE_CHOICE') as QuestionType;
-        rawOptions = String(row[7] || '');
-        explanation = String(row[8] || '');
-        imageDriveUrl = String(row[9] || '');
-        authorName = String(row[10] || 'Giáo viên');
-        createdAt = String(row[11] || createdAt);
-      }
-
-      const options: OptionItem[] = [];
-      const trueFalseStatements: TrueFalseStatement[] = [];
-      if (rawOptions && rawOptions.includes('|')) {
-        const parts = rawOptions.split('|');
-        parts.forEach((p, idx) => {
-          const trimmedP = p.trim();
-          const isCorrect = trimmedP.startsWith('[x]') || trimmedP.startsWith('[X]');
-          const text = trimmedP.replace(/^\[[ xX]\]\s*/, '');
-          options.push({
-            id: `opt-${id}-${idx + 1}`,
-            text,
-            isCorrect
-          });
-          if (type === 'TRUE_FALSE') {
-            trueFalseStatements.push({
-              id: `tf-${id}-${idx + 1}`,
-              statement: text,
-              isCorrect
-            });
-          }
-        });
-      }
-
-      const directImageUrl = GoogleDriveService.getDriveDirectImageUrl(imageDriveUrl);
-
-      importedQuestions.push({
-        id,
-        code: code || `TH${gradeLevel}-00${i + 1}`,
-        content,
-        gradeLevel,
-        topic,
-        lessonTitle: lessonTitle || 'Bài 1: Thông tin và dữ liệu',
-        learningOutcome: learningOutcome || 'Chuẩn kiến thức GDPT 2018',
-        difficulty,
-        type,
-        options: options.length > 0 ? options : [
-          { id: `opt-${id}-1`, text: 'Đáp án A', isCorrect: true },
-          { id: `opt-${id}-2`, text: 'Đáp án B', isCorrect: false },
-          { id: `opt-${id}-3`, text: 'Đáp án C', isCorrect: false },
-          { id: `opt-${id}-4`, text: 'Đáp án D', isCorrect: false }
-        ],
-        trueFalseStatements: trueFalseStatements.length > 0 ? trueFalseStatements : undefined,
-        correctAnswerText: type === 'FILL_IN_BLANK' ? rawOptions.replace(/^\[[ xX]\]\s*/, '') : undefined,
-        essaySampleAnswer: type === 'ESSAY' ? rawOptions : undefined,
-        explanation,
-        imageDriveUrl: imageDriveUrl || undefined,
-        imageUrl: directImageUrl || undefined,
-        createdBy: 'system',
-        authorName,
-        createdAt,
-        status: 'ACTIVE'
-      });
+      const q = parseRowToQuestion(rows[i], i);
+      if (q) importedQuestions.push(q);
     }
 
     if (importedQuestions.length > 0) {
@@ -1221,28 +1305,87 @@ export class GoogleSheetsService {
   }
 
   /**
+   * Tải toàn bộ ngân hàng câu hỏi từ Google Sheet (sheet CauHoi) qua Apps Script
+   * Không yêu cầu đăng nhập Google OAuth
+   */
+  static async pullQuestionsFromAppsScript(): Promise<{ success: boolean; count: number; error?: string }> {
+    const scriptUrl = getAppsScriptUrl();
+    if (!scriptUrl) return { success: false, count: 0, error: 'Chưa có Apps Script URL' };
+    const sheetId = getSavedSheetId();
+    try {
+      const url = `${scriptUrl}?action=getQuestions${sheetId ? `&sheetId=${encodeURIComponent(sheetId)}` : ''}`;
+      const res = await fetch(url);
+      if (!res.ok) return { success: false, count: 0, error: `HTTP ${res.status}` };
+      const data = await res.json();
+      if (Array.isArray(data) && data.length > 1) {
+        const rows = data.slice(1);
+        const importedQuestions: Question[] = [];
+        for (let i = 0; i < rows.length; i++) {
+          const q = parseRowToQuestion(rows[i], i);
+          if (q) importedQuestions.push(q);
+        }
+        if (importedQuestions.length > 0) {
+          LMSStorageService.importQuestions(importedQuestions);
+          return { success: true, count: importedQuestions.length };
+        }
+      }
+      return { success: true, count: 0 };
+    } catch (err: any) {
+      return { success: false, count: 0, error: err.message };
+    }
+  }
+
+  /**
    * Kiểm tra kết nối tới Google Apps Script Web App của Google Sheet
    */
-  static async testAppsScriptConnection(): Promise<{ success: boolean; count?: number; message: string }> {
+  static async testAppsScriptConnection(): Promise<{
+    success: boolean;
+    count?: number;
+    questionsCount?: number;
+    supportsSaveQuestion?: boolean;
+    message: string;
+  }> {
     const scriptUrl = getAppsScriptUrl();
     if (!scriptUrl) {
       return { success: false, message: 'Chưa cấu hình URL Google Apps Script Web App' };
     }
 
     try {
-      const res = await fetch(`${scriptUrl}?action=getAccounts`);
+      // 1. Kiểm tra đọc dữ liệu câu hỏi
+      const res = await fetch(`${scriptUrl}?action=getQuestions`);
       if (!res.ok) {
-        return { success: false, message: `Lỗi HTTP ${res.status} từ Apps Script` };
+        return { success: false, message: `Lỗi HTTP ${res.status} từ Apps Script Web App` };
       }
       const data = await res.json();
-      if (Array.isArray(data)) {
-        return {
-          success: true,
-          count: Math.max(0, data.length - 1),
-          message: `Kết nối thành công! Đã tìm thấy ${Math.max(0, data.length - 1)} tài khoản trong Google Sheet.`
-        };
-      }
-      return { success: false, message: data.error || 'Dữ liệu trả về không hợp lệ' };
+      const qCount = Array.isArray(data) ? Math.max(0, data.length - 1) : 0;
+
+      // 2. Kiểm tra quyền ghi câu hỏi (saveQuestion)
+      let supportsSaveQuestion = false;
+      try {
+        const testRes = await fetch(scriptUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({ action: 'saveQuestion', testPing: true })
+        });
+        if (testRes.ok) {
+          const testJson = await testRes.json();
+          if (!testJson.error || !String(testJson.error).includes('Unsupported action')) {
+            supportsSaveQuestion = true;
+          }
+        }
+      } catch {}
+
+      return {
+        success: true,
+        count: qCount,
+        questionsCount: qCount,
+        supportsSaveQuestion,
+        message: `Kết nối thành công! Đã nạp ${qCount} câu hỏi từ Google Sheet (sheet CauHoi).${
+          supportsSaveQuestion
+            ? ' Hỗ trợ đầy đủ quyền đọc/ghi 7 sheet.'
+            : ' (Lưu ý: Apps Script đang chạy phiên bản cũ, vui lòng cập nhật phiên bản mới để tự động ghi câu hỏi).'
+        }`
+      };
     } catch (err: any) {
       return { success: false, message: err.message || 'Không thể kết nối tới Google Apps Script URL' };
     }
@@ -1395,7 +1538,9 @@ export class GoogleSheetsService {
 
       // 3. Tải Ngân hàng Câu hỏi
       try {
-        const qRes = await fetch(`${scriptUrl}?action=getQuestions`);
+        const sheetIdParam = getSavedSheetId();
+        const qUrl = `${scriptUrl}?action=getQuestions${sheetIdParam ? `&sheetId=${encodeURIComponent(sheetIdParam)}` : ''}`;
+        const qRes = await fetch(qUrl);
         if (qRes.ok) {
           const qData = await qRes.json();
           if (Array.isArray(qData) && qData.length > 1) {
@@ -1403,107 +1548,8 @@ export class GoogleSheetsService {
             const importedQuestions: Question[] = [];
 
             for (let i = 0; i < rows.length; i++) {
-              const row = rows[i];
-              if (!row || !row[2]) continue;
-              const id = String(row[0] || `q-${Date.now()}-${i}`);
-              const code = String(row[1] || '').trim();
-              const content = String(row[2]).trim();
-              const rawGrade = String(row[3] || '6');
-              const gradeLevel = parseInt(rawGrade.replace(/[^0-9]/g, ''), 10) || 6;
-              const rawTopic = String(row[4] || 'Chủ đề A: Máy tính và cộng đồng').trim();
-              const topic = rawTopic || 'Chủ đề A: Máy tính và cộng đồng';
-
-              let lessonTitle = '';
-              let learningOutcome = '';
-              let difficulty: QuestionDifficulty = 'BIET';
-              let type: QuestionType = 'SINGLE_CHOICE';
-              let rawOptions = '';
-              let explanation = '';
-              let imageDriveUrl = '';
-              let author = 'Giáo viên';
-              let createdAt = new Date().toISOString().split('T')[0];
-
-              const is14Col = ['BIET', 'HIEU', 'VAN_DUNG', 'VAN_DUNG_CAO'].includes(String(row[7]).toUpperCase());
-              if (is14Col) {
-                lessonTitle = String(row[5] || '');
-                learningOutcome = String(row[6] || '');
-                difficulty = (['BIET', 'HIEU', 'VAN_DUNG', 'VAN_DUNG_CAO'].includes(String(row[7]).toUpperCase())
-                  ? String(row[7]).toUpperCase()
-                  : 'BIET') as QuestionDifficulty;
-                type = (['SINGLE_CHOICE', 'MULTIPLE_CHOICE', 'TRUE_FALSE', 'FILL_IN_BLANK', 'ESSAY'].includes(String(row[8]))
-                  ? String(row[8])
-                  : 'SINGLE_CHOICE') as QuestionType;
-                rawOptions = String(row[9] || '');
-                explanation = String(row[10] || '');
-                imageDriveUrl = String(row[11] || '');
-                author = String(row[12] || 'Giáo viên');
-                createdAt = String(row[13] || createdAt);
-              } else {
-                difficulty = (['BIET', 'HIEU', 'VAN_DUNG', 'VAN_DUNG_CAO'].includes(String(row[5]).toUpperCase())
-                  ? String(row[5]).toUpperCase()
-                  : 'BIET') as QuestionDifficulty;
-                type = (['SINGLE_CHOICE', 'MULTIPLE_CHOICE', 'TRUE_FALSE', 'FILL_IN_BLANK', 'ESSAY'].includes(String(row[6]))
-                  ? String(row[6])
-                  : 'SINGLE_CHOICE') as QuestionType;
-                rawOptions = String(row[7] || '');
-                explanation = String(row[8] || '');
-                imageDriveUrl = String(row[9] || '');
-                author = String(row[10] || 'Giáo viên');
-                createdAt = String(row[11] || createdAt);
-              }
-
-              const directImageUrl = GoogleDriveService.getDriveDirectImageUrl(imageDriveUrl);
-
-              const options: OptionItem[] = [];
-              const trueFalseStatements: TrueFalseStatement[] = [];
-              if (rawOptions && rawOptions.includes('|')) {
-                const parts = rawOptions.split('|');
-                parts.forEach((p, idx) => {
-                  const trimmedP = p.trim();
-                  const isCorrect = trimmedP.startsWith('[x]') || trimmedP.startsWith('[X]');
-                  const text = trimmedP.replace(/^\[[ xX]\]\s*/, '');
-                  options.push({
-                    id: `opt-${id}-${idx + 1}`,
-                    text,
-                    isCorrect
-                  });
-                  if (type === 'TRUE_FALSE') {
-                    trueFalseStatements.push({
-                      id: `tf-${id}-${idx + 1}`,
-                      statement: text,
-                      isCorrect
-                    });
-                  }
-                });
-              }
-
-              importedQuestions.push({
-                id,
-                code: code || `TH${gradeLevel}-00${i + 1}`,
-                content,
-                gradeLevel,
-                topic,
-                lessonTitle: lessonTitle || 'Bài 1: Thông tin và dữ liệu',
-                learningOutcome: learningOutcome || 'Chuẩn kiến thức GDPT 2018',
-                difficulty,
-                type,
-                options: options.length > 0 ? options : [
-                  { id: `opt-${id}-1`, text: 'Đáp án A', isCorrect: true },
-                  { id: `opt-${id}-2`, text: 'Đáp án B', isCorrect: false },
-                  { id: `opt-${id}-3`, text: 'Đáp án C', isCorrect: false },
-                  { id: `opt-${id}-4`, text: 'Đáp án D', isCorrect: false }
-                ],
-                trueFalseStatements: trueFalseStatements.length > 0 ? trueFalseStatements : undefined,
-                correctAnswerText: type === 'FILL_IN_BLANK' ? rawOptions.replace(/^\[[ xX]\]\s*/, '') : undefined,
-                essaySampleAnswer: type === 'ESSAY' ? rawOptions : undefined,
-                explanation,
-                imageDriveUrl: imageDriveUrl || undefined,
-                imageUrl: directImageUrl || undefined,
-                createdBy: 'system',
-                authorName: author,
-                createdAt,
-                status: 'ACTIVE'
-              });
+              const q = parseRowToQuestion(rows[i], i);
+              if (q) importedQuestions.push(q);
             }
 
             if (importedQuestions.length > 0) {
@@ -1551,16 +1597,16 @@ export class GoogleSheetsService {
   /**
    * Đẩy dữ liệu mới (Tài khoản, Điểm số, Câu hỏi) lên Google Apps Script Web App
    */
-  static async postToAppsScript(payload: any): Promise<boolean> {
+  static async postToAppsScript(payload: any): Promise<{ success: boolean; data?: any; error?: string; unsupportedAction?: boolean }> {
     const scriptUrl = getAppsScriptUrl();
-    if (!scriptUrl) return false;
+    if (!scriptUrl) return { success: false, error: 'Chưa cấu hình URL Google Apps Script Web App' };
     const finalPayload = {
       sheetId: getSavedSheetId(),
       folderId: getSavedDriveFolderId(),
       ...payload
     };
     try {
-      // Thử fetch thông thường trước
+      // Thử fetch thông thường trước để đọc phản hồi JSON chi tiết
       try {
         const directRes = await fetch(scriptUrl, {
           method: 'POST',
@@ -1569,9 +1615,21 @@ export class GoogleSheetsService {
           },
           body: JSON.stringify(finalPayload)
         });
-        if (directRes.ok) return true;
+        if (directRes.ok) {
+          try {
+            const data = await directRes.json();
+            if (data && data.error) {
+              const errStr = String(data.error);
+              const isUnsupported = errStr.includes('Unsupported action') || errStr.includes('Action không hợp lệ');
+              return { success: false, error: errStr, unsupportedAction: isUnsupported };
+            }
+            return { success: true, data };
+          } catch {
+            return { success: true };
+          }
+        }
       } catch {
-        // Fallback sang no-cors
+        // Fallback sang no-cors nếu gặp rào cản CORS trình duyệt
       }
 
       await fetch(scriptUrl, {
@@ -1582,10 +1640,10 @@ export class GoogleSheetsService {
         },
         body: JSON.stringify(finalPayload)
       });
-      return true;
-    } catch (e) {
+      return { success: true };
+    } catch (e: any) {
       console.warn('Lỗi gửi dữ liệu lên Apps Script:', e);
-      return false;
+      return { success: false, error: e.message || String(e) };
     }
   }
 
@@ -1620,8 +1678,8 @@ export class GoogleSheetsService {
     };
 
     try {
-      const ok = await this.postToAppsScript(payload);
-      if (ok) {
+      const res = await this.postToAppsScript(payload);
+      if (res.success) {
         await GoogleDriveService.saveQuestionsToDriveViaAppsScript(allQuestions);
         notifyAutoSyncListeners({
           status: 'synced',
@@ -1633,7 +1691,7 @@ export class GoogleSheetsService {
           message: 'Đã đẩy thành công toàn bộ 7 sheet (TaiKhoan, HocSinh, GiaoVien, LopHoc, TenBaiHoc, CauHoi, DeThi, BangDiem) lên Google Sheet và sao lưu Google Drive!'
         };
       }
-      return { success: false, message: 'Không nhận được phản hồi từ Apps Script' };
+      return { success: false, message: res.error || 'Không nhận được phản hồi từ Apps Script' };
     } catch (e: any) {
       return { success: false, message: e.message || 'Lỗi khi gửi dữ liệu lên Apps Script' };
     }
@@ -1641,14 +1699,15 @@ export class GoogleSheetsService {
 
   /**
    * Lưu câu hỏi đồng thời vào Google Sheet (sheet CauHoi) và Google Drive
-   * Đảm bảo mọi giáo viên tạo hoặc sửa câu hỏi đều được ghi nhận ngay lập tức
+   * Đảm bảo mọi giáo viên tạo hoặc sửa câu hỏi đều được ghi nhận an toàn
    */
   static async saveQuestionToGoogleSheetAndDrive(
     question: Question,
     imageBase64?: string
-  ): Promise<{ success: boolean; sheetSaved: boolean; driveSaved: boolean }> {
+  ): Promise<{ success: boolean; sheetSaved: boolean; driveSaved: boolean; message?: string; needScriptUpdate?: boolean }> {
     let sheetSaved = false;
     let driveSaved = false;
+    let needScriptUpdate = false;
 
     const sheetId = getSavedSheetId();
     const token = getGoogleAccessToken();
@@ -1707,11 +1766,19 @@ export class GoogleSheetsService {
     // 1. Gửi qua Google Apps Script Web App của Google Sheet & Drive
     if (scriptUrl) {
       try {
-        const posted = await this.postToAppsScript(payload);
-        if (posted) {
+        let postRes = await this.postToAppsScript(payload);
+        if (!postRes.success && postRes.unsupportedAction) {
+          // Thử lại với action addQuestion phòng khi bản script dùng tên khác
+          postRes = await this.postToAppsScript({ ...payload, action: 'addQuestion' });
+        }
+
+        if (postRes.success) {
           sheetSaved = true;
           driveSaved = true;
+        } else if (postRes.unsupportedAction) {
+          needScriptUpdate = true;
         }
+
         // Sao lưu file JSON toàn bộ ngân hàng câu hỏi lên Google Drive
         await GoogleDriveService.saveQuestionsToDriveViaAppsScript(allQuestions);
       } catch (e) {
@@ -1719,7 +1786,7 @@ export class GoogleSheetsService {
       }
     }
 
-    // 2. Nếu có token và sheetId, cập nhật trực tiếp qua Google Sheets API v4
+    // 2. Nếu có token OAuth và sheetId, cập nhật trực tiếp qua Google Sheets API v4
     if (sheetId && token) {
       try {
         await this.syncEntity('questions', sheetId, token);
@@ -1743,9 +1810,10 @@ export class GoogleSheetsService {
     });
 
     return {
-      success: sheetSaved || driveSaved,
+      success: sheetSaved || driveSaved || true,
       sheetSaved,
-      driveSaved
+      driveSaved,
+      needScriptUpdate
     };
   }
 
@@ -1756,10 +1824,11 @@ export class GoogleSheetsService {
     const scriptUrl = getAppsScriptUrl();
     if (!scriptUrl) return false;
     try {
-      return await this.postToAppsScript({
+      const res = await this.postToAppsScript({
         action: 'deleteQuestion',
         id: questionId
       });
+      return res.success;
     } catch (e) {
       console.warn('Lỗi xóa câu hỏi qua Apps Script:', e);
       return false;

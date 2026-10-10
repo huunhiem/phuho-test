@@ -6,6 +6,10 @@ export const SYSTEM_CONFIG_KEY = 'phuho_lms_system_connection_config';
 export const DRIVE_FOLDER_ID_KEY = 'phuho_lms_drive_folder_id';
 export const DRIVE_FOLDER_URL_KEY = 'phuho_lms_drive_folder_url';
 
+// Giá trị mặc định bảng tính và thư mục Drive của Trường THCS Phú Hồ
+export const DEFAULT_SCHOOL_SHEET_ID = '1phuho_lms_database_sheets';
+export const DEFAULT_SCHOOL_DRIVE_FOLDER_URL = 'https://drive.google.com/drive/folders/1phuho_lms_drive_nganhang_cautracnghiem';
+
 export const getSavedSheetId = (): string => {
   try {
     const direct = localStorage.getItem(SHEET_ID_KEY);
@@ -54,7 +58,7 @@ export const getSavedDriveFolderUrl = (): string => {
   } catch {
     // ignore
   }
-  return 'https://drive.google.com/';
+  return DEFAULT_SCHOOL_DRIVE_FOLDER_URL;
 };
 
 export const getAppsScriptUrl = (): string => {
@@ -96,6 +100,16 @@ export const extractSheetId = (input: string): string => {
   return trimmed;
 };
 
+export const extractDriveFolderId = (input: string): string => {
+  if (!input) return '';
+  const trimmed = input.trim();
+  const match = trimmed.match(/\/folders\/([a-zA-Z0-9-_]+)/);
+  if (match && match[1]) {
+    return match[1];
+  }
+  return trimmed;
+};
+
 export interface SystemConnectionConfig {
   sheetId: string;
   sheetUrl?: string;
@@ -107,3 +121,13 @@ export interface SystemConnectionConfig {
   lastConfiguredAt?: string;
   configuredByName?: string;
 }
+
+/**
+ * Kiểm tra xem hệ thống đã được cấu hình kết nối hay chưa
+ * Trả về true nếu Quản trị viên đã thiết lập (hoặc có Apps Script URL)
+ */
+export const isSystemConnected = (): boolean => {
+  const scriptUrl = getAppsScriptUrl();
+  const sheetId = getSavedSheetId();
+  return Boolean(scriptUrl && scriptUrl.trim()) || Boolean(sheetId && sheetId.trim());
+};

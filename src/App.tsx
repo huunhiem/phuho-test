@@ -18,6 +18,7 @@ import { PrincipalView } from './components/principal/PrincipalView';
 import { FirebaseConfigGuide } from './components/firebase/FirebaseConfigGuide';
 import { GoogleSheetManager } from './components/sheets/GoogleSheetManager';
 import { LoginScreen } from './components/auth/LoginScreen';
+import { GoogleSheetsService } from './services/googleSheetsService';
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
@@ -64,11 +65,17 @@ export default function App() {
     currentUser ? getDefaultTabForRole(currentUser.role) : 'student_dashboard'
   );
 
+  // Tự động nạp sẵn toàn bộ ngân hàng câu hỏi từ Google Sheet của trường vào bộ nhớ khi mở ứng dụng
+  useEffect(() => {
+    GoogleSheetsService.pullQuestionsFromAppsScript().catch(() => {});
+  }, []);
+
   // Khi đăng nhập thành công, lưu tài khoản và kích hoạt màn hình đúng theo vai trò của tài khoản đó
   const handleLoginSuccess = (user: User) => {
     setCurrentUser(user);
     LMSStorageService.setCurrentUser(user);
     setActiveTab(getDefaultTabForRole(user.role));
+    GoogleSheetsService.pullQuestionsFromAppsScript().catch(() => {});
   };
 
   // Đăng xuất hoàn toàn để đổi sang tài khoản khác

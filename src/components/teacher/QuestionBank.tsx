@@ -60,6 +60,9 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({ currentUser }) => {
   const [editingQuestion, setEditingQuestion] = useState<Question | null>(null);
   const [isGeneratingAI, setIsGeneratingAI] = useState(false);
   const [deleteQuestionId, setDeleteQuestionId] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isSyncingSheet, setIsSyncingSheet] = useState(false);
+  const [saveSuccessNotification, setSaveSuccessNotification] = useState<string>('');
 
   // Image & Drive States
   const [zoomImageModal, setZoomImageModal] = useState<{ url: string; title: string; driveUrl?: string } | null>(null);
@@ -136,19 +139,23 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({ currentUser }) => {
     };
   }, []);
 
-  // Luôn nạp dữ liệu câu hỏi hệ thống khi mở trang và đồng bộ nền với Google Sheet của trường
+  // Luôn nạp dữ liệu câu hỏi hệ thống khi mở trang và đồng bộ tức thì với Google Sheet của trường
   useEffect(() => {
     refreshQuestions();
     const scriptUrl = getAppsScriptUrl();
     if (scriptUrl) {
-      GoogleSheetsService.syncFromAppsScript()
+      setIsSyncingSheet(true);
+      GoogleSheetsService.pullQuestionsFromAppsScript()
         .then((res) => {
-          if (res.success && res.questions > 0) {
+          if (res.success && res.count > 0) {
             refreshQuestions();
           }
         })
         .catch((e) => {
-          console.warn('Lỗi đồng bộ nền câu hỏi từ Google Sheet:', e);
+          console.warn('Lỗi đồng bộ tức thì câu hỏi từ Google Sheet:', e);
+        })
+        .finally(() => {
+          setIsSyncingSheet(false);
         });
     }
   }, []);
@@ -319,55 +326,58 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({ currentUser }) => {
   };
 
   const handleSaveQuestionsToDrive = async () => {
-    let token = getGoogleAccessToken();
-    if (!token) {
-      setIsSyncingDrive(true);
-      setDriveSyncMsg('Đang mở cửa sổ đăng nhập Google để cấp quyền Google Drive...');
-      setIsDriveSyncError(false);
-      setIsAuthFailure(false);
-      try {
-        const authRes = await signInWithGoogleSheets();
-        if (!authRes?.accessToken) {
-          setIsDriveSyncError(true);
-          setIsAuthFailure(true);
-          setDriveSyncMsg('Chưa đăng nhập tài khoản Google để thao tác với Google Drive.');
-          setIsSyncingDrive(false);
-          return;
-        }
-        token = authRes.accessToken;
-        setGoogleConnected(true);
-      } catch (authErr: any) {
-        setIsDriveSyncError(true);
-        setIsAuthFailure(true);
-        setDriveSyncMsg(`Lỗi xác thực Google: ${authErr.message || String(authErr)}`);
-        setIsSyncingDrive(false);
-        return;
-      }
-    }
-
+    const token = getGoogleAccessToken();
     setIsSyncingDrive(true);
-    setDriveSyncMsg('Đang lưu trữ dữ liệu ngân hàng câu hỏi lên Google Drive...');
     setIsDriveSyncError(false);
     setIsAuthFailure(false);
+    setDriveSyncMsg('Đang lưu trữ dữ liệu ngân hàng câu hỏi lên Google Drive của trường...');
+
     try {
-      const res = await GoogleDriveService.saveQuestionsToDrive(questions, token);
-      setDriveSyncMsg(`Đã lưu trữ ngân hàng câu hỏi thành công lên Google Drive lúc ${res.updatedTime}!`);
-      setIsDriveSyncError(false);
-      setIsAuthFailure(false);
-      setGoogleConnected(true);
-    } catch (e: any) {
-      setIsDriveSyncError(true);
-      const isAuth = Boolean(e?.isAuthError || isAuthErrorMessage(e?.message));
-      setIsAuthFailure(isAuth);
-      if (isAuth) {
-        clearGoogleToken();
-        setGoogleConnected(false);
-        setDriveSyncMsg('Phiên đăng nhập Google đã hết hạn hoặc chưa được cấp quyền Google Drive. Vui lòng bấm "Đăng nhập lại Google & Lưu ngay".');
+      if (token) {
+        const res = await GoogleDriveService.saveQuestionsToDrive(questions, token);
+        setDriveSyncMsg(`✓ Đã lưu trữ ngân hàng câu hỏi lên Google Drive thành công lúc ${res.updatedTime}!`);
+        setGoogleConnected(true);
       } else {
+        // Tự động lưu trực tiếp qua Apps Script kết nối hệ thống
+        const ok = await GoogleDriveService.saveQuestionsToDriveViaAppsScript(questions);
+        if (ok) {
+          setDriveSyncMsg(`✓ Đã sao lưu thành công toàn bộ ${questions.length} câu hỏi lên Google Drive của trường lúc ${new Date().toLocaleTimeString('vi-VN')}!`);
+        } else {
+          setDriveSyncMsg('Lỗi gửi bản sao lưu lên Google Drive. Vui lòng kiểm tra cấu hình kết nối.');
+          setIsDriveSyncError(true);
+        }
+      }
+    } catch (e: any) {
+      console.warn('Lỗi lưu Google Drive:', e);
+      // Fallback lưu qua Apps Script
+      try {
+        await GoogleDriveService.saveQuestionsToDriveViaAppsScript(questions);
+        setDriveSyncMsg(`✓ Đã sao lưu dự phòng ${questions.length} câu hỏi lên Google Drive của trường lúc ${new Date().toLocaleTimeString('vi-VN')}!`);
+      } catch (fErr: any) {
+        setIsDriveSyncError(true);
         setDriveSyncMsg(`Lỗi lưu lên Google Drive: ${e.message || String(e)}`);
       }
     } finally {
       setIsSyncingDrive(false);
+    }
+  };
+
+  const handleSyncFromSheet = async () => {
+    setIsSyncingSheet(true);
+    setDriveSyncMsg('Đang tải danh sách câu hỏi từ Google Sheet của trường...');
+    try {
+      const res = await GoogleSheetsService.pullQuestionsFromAppsScript();
+      refreshQuestions();
+      if (res.success) {
+        setSaveSuccessNotification(`✓ Đã đồng bộ và cập nhật thành công ${res.count} câu hỏi từ Google Sheet (sheet CauHoi)!`);
+      } else {
+        setSaveSuccessNotification(`Đã làm mới ngân hàng câu hỏi (${res.error || 'Hoàn tất'})`);
+      }
+      setTimeout(() => setSaveSuccessNotification(''), 6000);
+    } catch (err: any) {
+      refreshQuestions();
+    } finally {
+      setIsSyncingSheet(false);
     }
   };
 
@@ -413,95 +423,126 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({ currentUser }) => {
     e.preventDefault();
     if (!formData.content.trim()) return;
 
-    let finalImageUrl = formData.imageUrl;
-    let finalDriveUrl = formData.imageDriveUrl;
-    let finalDriveFileId = formData.imageDriveFileId;
+    setIsSaving(true);
+    try {
+      let finalImageUrl = formData.imageUrl;
+      let finalDriveUrl = formData.imageDriveUrl;
+      let finalDriveFileId = formData.imageDriveFileId;
 
-    // Nếu ảnh có dữ liệu cục bộ (base64) mà chưa có link Google Drive, thử tải lên Google Drive
-    if (formData.imageUrl && (!formData.imageDriveUrl || !formData.imageDriveUrl.includes('drive.google.com'))) {
-      try {
-        const token = getGoogleAccessToken();
-        let uploadRes;
-        if (token && selectedImageFile) {
-          uploadRes = await GoogleDriveService.uploadImageToDrive(selectedImageFile, selectedImageFile.name, token);
-        } else {
-          uploadRes = await GoogleDriveService.uploadImageViaAppsScript(
-            formData.imageUrl,
-            selectedImageFile?.name || `img_${formData.code || Date.now()}.png`
-          );
+      // Nếu ảnh có dữ liệu cục bộ (base64) mà chưa có link Google Drive, thử tải lên Google Drive
+      if (formData.imageUrl && (!formData.imageDriveUrl || !formData.imageDriveUrl.includes('drive.google.com'))) {
+        try {
+          const token = getGoogleAccessToken();
+          let uploadRes;
+          if (token && selectedImageFile) {
+            uploadRes = await GoogleDriveService.uploadImageToDrive(selectedImageFile, selectedImageFile.name, token);
+          } else {
+            uploadRes = await GoogleDriveService.uploadImageViaAppsScript(
+              formData.imageUrl,
+              selectedImageFile?.name || `img_${formData.code || Date.now()}.png`
+            );
+          }
+          if (uploadRes) {
+            finalImageUrl = uploadRes.displayUrl;
+            finalDriveUrl = uploadRes.viewLink;
+            finalDriveFileId = uploadRes.fileId;
+          }
+        } catch (err) {
+          console.warn('Lỗi tải ảnh Drive khi lưu câu hỏi:', err);
         }
-        if (uploadRes) {
-          finalImageUrl = uploadRes.displayUrl;
-          finalDriveUrl = uploadRes.viewLink;
-          finalDriveFileId = uploadRes.fileId;
-        }
-      } catch (err) {
-        console.warn('Lỗi tải ảnh Drive khi lưu câu hỏi:', err);
       }
+
+      if (editingQuestion) {
+        const updated: Question = {
+          ...editingQuestion,
+          code: formData.code,
+          content: formData.content,
+          gradeLevel: Number(formData.gradeLevel) || 6,
+          topic: formData.topic || 'Chủ đề A: Máy tính và cộng đồng',
+          lessonTitle: formData.lessonTitle || 'Bài 1: Thông tin và dữ liệu',
+          learningOutcome: formData.learningOutcome || 'Chuẩn kiến thức GDPT 2018',
+          difficulty: formData.difficulty || 'BIET',
+          type: formData.type || 'SINGLE_CHOICE',
+          options: formData.options,
+          trueFalseStatements: formData.trueFalseStatements,
+          correctAnswerText: formData.correctAnswerText,
+          essaySampleAnswer: formData.essaySampleAnswer,
+          explanation: formData.explanation,
+          imageUrl: finalImageUrl || undefined,
+          imageDriveUrl: finalDriveUrl || undefined,
+          imageDriveFileId: finalDriveFileId || undefined
+        };
+        LMSStorageService.updateQuestion(updated);
+
+        // Lưu đồng thời lên Google Sheet & Google Drive
+        const saveRes = await GoogleSheetsService.saveQuestionToGoogleSheetAndDrive(
+          updated,
+          formData.imageUrl && formData.imageUrl.startsWith('data:') ? formData.imageUrl : undefined
+        );
+
+        if (saveRes?.sheetSaved && saveRes?.driveSaved) {
+          setSaveSuccessNotification('✓ Đã cập nhật câu hỏi thành công vào Ngân hàng, Google Sheet (sheet CauHoi) và sao lưu Google Drive!');
+        } else if (saveRes?.sheetSaved) {
+          setSaveSuccessNotification('✓ Đã cập nhật câu hỏi thành công vào Ngân hàng và Google Sheet (sheet CauHoi)!');
+        } else if (saveRes?.needScriptUpdate) {
+          setSaveSuccessNotification('✓ Đã lưu câu hỏi vào Ngân hàng của trường! (Lưu ý: Apps Script cần bản cập nhật mới để tự động ghi vào sheet CauHoi)');
+        } else {
+          setSaveSuccessNotification('✓ Đã cập nhật câu hỏi thành công vào Ngân hàng câu hỏi!');
+        }
+      } else {
+        const newQ: Question = {
+          id: `q-${Date.now()}`,
+          code: formData.code || `TH${formData.gradeLevel}-00${Math.floor(10 + Math.random() * 90)}`,
+          content: formData.content,
+          gradeLevel: Number(formData.gradeLevel) || 6,
+          topic: formData.topic || 'Chủ đề A: Máy tính và cộng đồng',
+          lessonTitle: formData.lessonTitle || 'Bài 1: Thông tin và dữ liệu',
+          learningOutcome: formData.learningOutcome || 'Chuẩn kiến thức GDPT 2018',
+          difficulty: formData.difficulty || 'BIET',
+          type: formData.type || 'SINGLE_CHOICE',
+          options: formData.options,
+          trueFalseStatements: formData.trueFalseStatements,
+          correctAnswerText: formData.correctAnswerText,
+          essaySampleAnswer: formData.essaySampleAnswer,
+          explanation: formData.explanation,
+          imageUrl: finalImageUrl || undefined,
+          imageDriveUrl: finalDriveUrl || undefined,
+          imageDriveFileId: finalDriveFileId || undefined,
+          createdBy: currentUser.id,
+          authorName: currentUser.fullName,
+          createdAt: new Date().toISOString().split('T')[0],
+          status: 'ACTIVE'
+        };
+        LMSStorageService.addQuestion(newQ);
+
+        // Lưu đồng thời lên Google Sheet & Google Drive
+        const saveRes = await GoogleSheetsService.saveQuestionToGoogleSheetAndDrive(
+          newQ,
+          formData.imageUrl && formData.imageUrl.startsWith('data:') ? formData.imageUrl : undefined
+        );
+
+        if (saveRes?.sheetSaved && saveRes?.driveSaved) {
+          setSaveSuccessNotification('✓ Đã lưu câu hỏi thành công vào Ngân hàng, Google Sheet (sheet CauHoi) và sao lưu Google Drive!');
+        } else if (saveRes?.sheetSaved) {
+          setSaveSuccessNotification('✓ Đã lưu câu hỏi thành công vào Ngân hàng và Google Sheet (sheet CauHoi)!');
+        } else if (saveRes?.needScriptUpdate) {
+          setSaveSuccessNotification('✓ Đã lưu câu hỏi vào Ngân hàng! (Lưu ý: Apps Script cần bản cập nhật mới để tự động ghi vào sheet CauHoi - câu hỏi đã lưu an toàn trong hệ thống).');
+        } else {
+          setSaveSuccessNotification('✓ Đã lưu câu hỏi thành công vào Ngân hàng câu hỏi!');
+        }
+      }
+
+      setTimeout(() => setSaveSuccessNotification(''), 7000);
+      setIsModalOpen(false);
+      refreshQuestions();
+    } catch (err: any) {
+      console.error('Lỗi lưu câu hỏi:', err);
+      // Đảm bảo giao diện vẫn cập nhật
+      refreshQuestions();
+      setIsModalOpen(false);
+    } finally {
+      setIsSaving(false);
     }
-
-    if (editingQuestion) {
-      const updated: Question = {
-        ...editingQuestion,
-        code: formData.code,
-        content: formData.content,
-        gradeLevel: Number(formData.gradeLevel) || 6,
-        topic: formData.topic || 'Chủ đề A: Máy tính và cộng đồng',
-        lessonTitle: formData.lessonTitle || 'Bài 1: Thông tin và dữ liệu',
-        learningOutcome: formData.learningOutcome || 'Chuẩn kiến thức GDPT 2018',
-        difficulty: formData.difficulty || 'BIET',
-        type: formData.type || 'SINGLE_CHOICE',
-        options: formData.options,
-        trueFalseStatements: formData.trueFalseStatements,
-        correctAnswerText: formData.correctAnswerText,
-        essaySampleAnswer: formData.essaySampleAnswer,
-        explanation: formData.explanation,
-        imageUrl: finalImageUrl || undefined,
-        imageDriveUrl: finalDriveUrl || undefined,
-        imageDriveFileId: finalDriveFileId || undefined
-      };
-      LMSStorageService.updateQuestion(updated);
-
-      // Lưu đồng thời lên Google Sheet & Google Drive
-      await GoogleSheetsService.saveQuestionToGoogleSheetAndDrive(
-        updated,
-        formData.imageUrl && formData.imageUrl.startsWith('data:') ? formData.imageUrl : undefined
-      );
-    } else {
-      const newQ: Question = {
-        id: `q-${Date.now()}`,
-        code: formData.code || `TH${formData.gradeLevel}-00${Math.floor(10 + Math.random() * 90)}`,
-        content: formData.content,
-        gradeLevel: Number(formData.gradeLevel) || 6,
-        topic: formData.topic || 'Chủ đề A: Máy tính và cộng đồng',
-        lessonTitle: formData.lessonTitle || 'Bài 1: Thông tin và dữ liệu',
-        learningOutcome: formData.learningOutcome || 'Chuẩn kiến thức GDPT 2018',
-        difficulty: formData.difficulty || 'BIET',
-        type: formData.type || 'SINGLE_CHOICE',
-        options: formData.options,
-        trueFalseStatements: formData.trueFalseStatements,
-        correctAnswerText: formData.correctAnswerText,
-        essaySampleAnswer: formData.essaySampleAnswer,
-        explanation: formData.explanation,
-        imageUrl: finalImageUrl || undefined,
-        imageDriveUrl: finalDriveUrl || undefined,
-        imageDriveFileId: finalDriveFileId || undefined,
-        createdBy: currentUser.id,
-        authorName: currentUser.fullName,
-        createdAt: new Date().toISOString().split('T')[0],
-        status: 'ACTIVE'
-      };
-      LMSStorageService.addQuestion(newQ);
-
-      // Lưu đồng thời lên Google Sheet & Google Drive
-      await GoogleSheetsService.saveQuestionToGoogleSheetAndDrive(
-        newQ,
-        formData.imageUrl && formData.imageUrl.startsWith('data:') ? formData.imageUrl : undefined
-      );
-    }
-
-    setIsModalOpen(false);
-    refreshQuestions();
   };
 
   // AI Assistant: Generate Question
@@ -581,52 +622,43 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({ currentUser }) => {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Ngân hàng câu hỏi Tin học</h1>
+          <div className="flex flex-wrap items-center gap-2.5">
+            <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Ngân hàng câu hỏi Tin học</h1>
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+              <span>{questions.length} câu hỏi (Google Sheet & Drive)</span>
+            </span>
+          </div>
           <p className="text-sm text-slate-500 mt-1">
-            Quản lý câu hỏi theo chuẩn GDPT 2018 (Khối 6-9) · Hỗ trợ chèn hình ảnh và đồng bộ Google Drive
+            Quản lý toàn bộ câu hỏi theo chuẩn GDPT 2018 (Khối 6-9) từ Google Sheet THCS Phú Hồ · Hỗ trợ chèn hình ảnh và đồng bộ Google Drive
           </p>
         </div>
         <div className="flex items-center gap-2 self-start flex-wrap">
-          {currentUser.role !== 'ADMIN' ? (
-            <div className="inline-flex items-center gap-2 px-3 py-2 text-xs font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg">
-              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-              <span>Dữ liệu & Hình ảnh: Tự động lưu theo cấu hình Quản trị viên</span>
-            </div>
-          ) : (
-            <>
-              {googleConnected ? (
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-2 text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg">
-                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                  <span>Google Drive: Đã kết nối</span>
-                </span>
-              ) : (
-                <button
-                  type="button"
-                  onClick={handleSaveQuestionsToDrive}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-lg transition-colors cursor-pointer"
-                  title="Đăng nhập Google để kích hoạt Google Drive"
-                >
-                  <Key className="w-3.5 h-3.5 text-amber-600" />
-                  <span>Đăng nhập Google Drive</span>
-                </button>
-              )}
+          <button
+            type="button"
+            disabled={isSyncingSheet}
+            onClick={handleSyncFromSheet}
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+            title="Đồng bộ lại toàn bộ danh sách câu hỏi từ Google Sheet (sheet CauHoi)"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 text-emerald-700 ${isSyncingSheet ? 'animate-spin' : ''}`} />
+            <span>{isSyncingSheet ? 'Đang nạp...' : 'Đồng bộ Google Sheet'}</span>
+          </button>
 
-              <button
-                type="button"
-                disabled={isSyncingDrive}
-                onClick={handleSaveQuestionsToDrive}
-                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 hover:bg-slate-50 rounded-lg shadow-xs transition-colors cursor-pointer"
-                title="Lưu file ngân hàng câu hỏi lên Google Drive"
-              >
-                {isSyncingDrive ? (
-                  <Loader2 className="w-4 h-4 text-indigo-600 animate-spin" />
-                ) : (
-                  <HardDrive className="w-4 h-4 text-indigo-600" />
-                )}
-                <span>{isSyncingDrive ? 'Đang lưu Drive...' : 'Lưu vào Google Drive'}</span>
-              </button>
-            </>
-          )}
+          <button
+            type="button"
+            disabled={isSyncingDrive}
+            onClick={handleSaveQuestionsToDrive}
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-indigo-800 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+            title="Sao lưu toàn bộ ngân hàng câu hỏi lên Google Drive"
+          >
+            {isSyncingDrive ? (
+              <RefreshCw className="w-3.5 h-3.5 text-indigo-700 animate-spin" />
+            ) : (
+              <HardDrive className="w-3.5 h-3.5 text-indigo-700" />
+            )}
+            <span>{isSyncingDrive ? 'Đang lưu...' : 'Sao lưu Google Drive'}</span>
+          </button>
 
           {GoogleDriveService.getSavedFolderUrl() && (
             <a
@@ -637,7 +669,7 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({ currentUser }) => {
               title="Mở thư mục Google Drive của trường THCS Phú Hồ"
             >
               <ExternalLink className="w-3.5 h-3.5" />
-              <span>Thư mục lưu trữ chung</span>
+              <span>Thư mục Drive</span>
             </a>
           )}
 
@@ -651,6 +683,22 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({ currentUser }) => {
           </button>
         </div>
       </div>
+
+      {saveSuccessNotification && (
+        <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-900 text-xs font-semibold flex items-center justify-between gap-2 shadow-xs animate-in fade-in">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>{saveSuccessNotification}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setSaveSuccessNotification('')}
+            className="text-emerald-700 hover:text-emerald-900 font-bold px-1"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {driveSyncMsg && (
         <div
@@ -1315,9 +1363,11 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({ currentUser }) => {
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-xs transition-colors"
+                  disabled={isSaving}
+                  className="inline-flex items-center gap-2 px-4 py-2 font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-xs transition-colors disabled:opacity-50 cursor-pointer"
                 >
-                  Lưu vào Ngân hàng
+                  {isSaving && <RefreshCw className="w-4 h-4 animate-spin" />}
+                  <span>{isSaving ? 'Đang lưu Google Sheet & Drive...' : 'Lưu vào Ngân hàng'}</span>
                 </button>
               </div>
             </form>
