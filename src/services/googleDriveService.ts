@@ -636,7 +636,9 @@ export class GoogleDriveService {
    * Lấy URL thư mục Google Drive đã kết nối
    */
   static getSavedFolderUrl(): string {
-    return localStorage.getItem(FOLDER_URL_KEY) || '';
+    const direct = localStorage.getItem(FOLDER_URL_KEY);
+    if (direct && direct.trim()) return direct.trim();
+    return getSavedDriveFolderUrl();
   }
 
   /**

@@ -8,7 +8,9 @@ export const DRIVE_FOLDER_URL_KEY = 'phuho_lms_drive_folder_url';
 
 // Giá trị mặc định bảng tính và thư mục Drive của Trường THCS Phú Hồ
 export const DEFAULT_SCHOOL_SHEET_ID = '1phuho_lms_database_sheets';
-export const DEFAULT_SCHOOL_DRIVE_FOLDER_URL = 'https://drive.google.com/drive/folders/1phuho_lms_drive_nganhang_cautracnghiem';
+export const DEFAULT_SCHOOL_DRIVE_FOLDER_ID = '1h7EXcsbNZHrxFq9bOsSxeXokAf9sxM1y';
+export const DEFAULT_SCHOOL_DRIVE_FOLDER_URL =
+  'https://drive.google.com/drive/folders/1h7EXcsbNZHrxFq9bOsSxeXokAf9sxM1y?usp=drive_link';
 
 export const getSavedSheetId = (): string => {
   try {
@@ -41,7 +43,7 @@ export const getSavedDriveFolderId = (): string => {
   } catch {
     // ignore
   }
-  return '';
+  return DEFAULT_SCHOOL_DRIVE_FOLDER_ID;
 };
 
 export const getSavedDriveFolderUrl = (): string => {

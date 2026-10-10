@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Lock,
   User as UserIcon,
@@ -6,8 +6,7 @@ import {
   EyeOff,
   LogIn,
   AlertCircle,
-  ShieldCheck,
-  ImageIcon
+  ShieldCheck
 } from 'lucide-react';
 import { User } from '../../types';
 import { LMSStorageService } from '../../services/storage';
@@ -23,10 +22,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
-  const [customImage, setCustomImage] = useState<string | null>(() => {
-    return localStorage.getItem('lms_truong_cover_image') || null;
-  });
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Tự động đồng bộ tài khoản mới nhất từ Google Sheet trong nền (không hiển thị UI kết nối dữ liệu)
   useEffect(() => {
@@ -43,25 +38,6 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
       isMounted = false;
     };
   }, []);
-
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const result = event.target?.result as string;
-        if (result) {
-          setCustomImage(result);
-          try {
-            localStorage.setItem('lms_truong_cover_image', result);
-          } catch {
-            // bỏ qua nếu vượt quota localStorage
-          }
-        }
-      };
-      reader.readAsDataURL(file);
-    }
-  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -244,40 +220,20 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
               </p>
             </div>
 
-            {/* HÌNH ẢNH TRƯỜNG: FILE Truong.jpg GIỮ NGUYÊN HÌNH ẢNH (BỎ VIỀN XUNG QUANH, CĂN GIỮA) */}
+            {/* HÌNH ẢNH TRƯỜNG THCS PHÚ HỒ: MẶC ĐỊNH TỪ GOOGLE DRIVE (CĂN GIỮA, KHÔNG YÊU CẦU CHỌN ẢNH KHÁC) */}
             <div className="w-full flex flex-col items-center">
               <div className="rounded-2xl overflow-hidden shadow-2xl bg-slate-950/60 p-1 flex items-center justify-center w-full">
                 <img
-                  src={customImage || '/Truong.jpg'}
+                  src="/Truong.jpg"
                   alt="Trường THCS Phú Hồ"
                   onError={(e) => {
                     const target = e.currentTarget;
-                    if (!target.src.endsWith('/truong.jpg')) {
-                      target.src = '/truong.jpg';
+                    if (!target.src.includes('googleusercontent')) {
+                      target.src = 'https://lh3.googleusercontent.com/d/116IbDOY0y3Emjzxb2A2BJYlMYAwS4s8J';
                     }
                   }}
-                  className="w-full h-auto max-h-[460px] object-contain rounded-xl mx-auto"
+                  className="w-full h-auto max-h-[460px] object-contain rounded-xl mx-auto shadow-inner"
                 />
-              </div>
-
-              {/* Nút nhỏ hỗ trợ chọn ảnh Truong.jpg nếu muốn tải lại trực tiếp từ máy tính */}
-              <div className="flex justify-center mt-3 w-full">
-                <input
-                  type="file"
-                  ref={fileInputRef}
-                  accept="image/*"
-                  onChange={handleImageUpload}
-                  className="hidden"
-                />
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  title="Chọn lại file ảnh Truong.jpg từ máy tính nếu muốn cập nhật"
-                  className="text-[11px] text-slate-400 hover:text-indigo-300 flex items-center gap-1.5 transition-colors cursor-pointer py-1 px-2.5 rounded-lg hover:bg-slate-800/60"
-                >
-                  <ImageIcon className="w-3.5 h-3.5" />
-                  <span>Chọn ảnh Truong.jpg từ máy</span>
-                </button>
               </div>
             </div>
           </div>
