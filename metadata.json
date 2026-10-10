@@ -1,6 +1,6 @@
 {
-  "name": "PHÚ HỒ IT LMS - Học & Kiểm tra Tin học THCS Phú Hồ",
-  "description": "Hệ thống quản lý học tập, ngân hàng câu hỏi và kiểm tra trực tuyến môn Tin học - Trường THCS Phú Hồ",
+  "name": "THCS PHÚ HỒ - CỔNG KIỂM TRA TRỰC TUYẾN",
+  "description": "THCS PHÚ HỒ - CỔNG KIỂM TRA TRỰC TUYẾN: Nền tảng kiểm tra, ngân hàng câu hỏi và quản lý đánh giá học sinh - Trường THCS Phú Hồ",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

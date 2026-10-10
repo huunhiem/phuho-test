@@ -50,6 +50,7 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({ currentUser }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [gradeFilter, setGradeFilter] = useState<string>('ALL');
   const [topicFilter, setTopicFilter] = useState<string>('ALL');
+  const [lessonFilter, setLessonFilter] = useState<string>('ALL');
   const [difficultyFilter, setDifficultyFilter] = useState<string>('ALL');
   const [typeFilter, setTypeFilter] = useState<string>('ALL');
 
@@ -170,15 +171,21 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({ currentUser }) => {
   const handleOpenAdd = () => {
     setEditingQuestion(null);
     setUploadImageStatus('');
-    const grade6Lessons = allLessons.filter((l) => l.gradeLevel === 6).sort((a, b) => a.lessonNumber - b.lessonNumber);
-    const firstLesson = grade6Lessons[0];
+
+    // Nạp mới danh sách bài học cấu hình từ Quản trị viên
+    const freshLessons = LMSStorageService.getLessons();
+    setAllLessons(freshLessons);
+
+    const targetGrade = gradeFilter === 'ALL' ? 6 : Number(gradeFilter);
+    const gradeLessons = freshLessons.filter((l) => l.gradeLevel === targetGrade).sort((a, b) => a.lessonNumber - b.lessonNumber);
+    const firstLesson = gradeLessons[0];
     const matchedTopic = firstLesson ? topics.find((t) => t.id === firstLesson.topicId) : null;
     setIsCustomLessonMode(false);
 
     setFormData({
-      code: `TH6-A-${Math.floor(10 + Math.random() * 90)}`,
+      code: `TH${targetGrade}-A-${Math.floor(10 + Math.random() * 90)}`,
       content: '',
-      gradeLevel: 6,
+      gradeLevel: targetGrade,
       topic: matchedTopic ? matchedTopic.name : 'Chủ đề A: Máy tính và cộng đồng',
       lessonTitle: firstLesson ? firstLesson.title : 'Bài 1: Thông tin và dữ liệu',
       learningOutcome: firstLesson?.learningOutcomes || 'Nhận biết được thông tin, dữ liệu và các thiết bị vào ra cơ bản',
@@ -210,7 +217,10 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({ currentUser }) => {
     setEditingQuestion(q);
     setUploadImageStatus(q.imageDriveUrl ? 'Đã lưu trên Google Drive' : '');
 
-    const lessonsInGrade = allLessons.filter((l) => l.gradeLevel === q.gradeLevel);
+    const freshLessons = LMSStorageService.getLessons();
+    setAllLessons(freshLessons);
+
+    const lessonsInGrade = freshLessons.filter((l) => l.gradeLevel === q.gradeLevel);
     const isConfiguredLesson = lessonsInGrade.some((l) => l.title === q.lessonTitle);
     setIsCustomLessonMode(!isConfiguredLesson && Boolean(q.lessonTitle));
 
@@ -242,7 +252,9 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({ currentUser }) => {
   };
 
   const handleGradeChange = (newGrade: number) => {
-    const lessonsInNewGrade = allLessons.filter((l) => l.gradeLevel === newGrade).sort((a, b) => a.lessonNumber - b.lessonNumber);
+    const freshLessons = LMSStorageService.getLessons();
+    setAllLessons(freshLessons);
+    const lessonsInNewGrade = freshLessons.filter((l) => l.gradeLevel === newGrade).sort((a, b) => a.lessonNumber - b.lessonNumber);
     const firstLesson = lessonsInNewGrade[0];
     const matchedTopic = firstLesson ? topics.find((t) => t.id === firstLesson.topicId) : null;
     setIsCustomLessonMode(false);
@@ -257,6 +269,22 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({ currentUser }) => {
     }));
   };
 
+  const handleTopicChange = (newTopicName: string) => {
+    const matchedTopic = topics.find((t) => t.name === newTopicName);
+    const topicId = matchedTopic?.id;
+    // Tìm bài học tương ứng với chủ đề này trong khối
+    const matchingLesson = allLessons.find(
+      (l) => l.gradeLevel === formData.gradeLevel && l.topicId === topicId
+    );
+
+    setFormData((prev) => ({
+      ...prev,
+      topic: newTopicName,
+      lessonTitle: matchingLesson ? matchingLesson.title : prev.lessonTitle,
+      learningOutcome: matchingLesson?.learningOutcomes || prev.learningOutcome
+    }));
+  };
+
   const handleLessonChange = (selectedVal: string) => {
     if (selectedVal === '__CUSTOM__') {
       setIsCustomLessonMode(true);
@@ -267,7 +295,7 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({ currentUser }) => {
       (l) => l.gradeLevel === formData.gradeLevel && l.title === selectedVal
     );
     if (matched) {
-      const matchedTopic = topics.find((t) => t.id === matchedTopicId(matched.topicId));
+      const matchedTopic = topics.find((t) => t.id === matched.topicId);
       setFormData((prev) => ({
         ...prev,
         lessonTitle: matched.title,
@@ -645,10 +673,11 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({ currentUser }) => {
     const qGrade = Number(q.gradeLevel || (q as any).grade || 6);
     const matchesGrade = gradeFilter === 'ALL' || qGrade === Number(gradeFilter);
     const matchesTopic = topicFilter === 'ALL' || (q.topic || '').includes(topicFilter);
+    const matchesLesson = lessonFilter === 'ALL' || q.lessonTitle === lessonFilter;
     const matchesDifficulty = difficultyFilter === 'ALL' || q.difficulty === difficultyFilter;
     const matchesType = typeFilter === 'ALL' || q.type === typeFilter;
 
-    return matchesSearch && matchesGrade && matchesTopic && matchesDifficulty && matchesType;
+    return matchesSearch && matchesGrade && matchesTopic && matchesLesson && matchesDifficulty && matchesType;
   });
 
   const getDifficultyBadge = (diff: QuestionDifficulty) => {
@@ -864,6 +893,22 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({ currentUser }) => {
             <option value="Chủ đề E">Chủ đề E</option>
             <option value="Chủ đề F">Chủ đề F</option>
           </select>
+
+          <select
+            value={lessonFilter}
+            onChange={(e) => setLessonFilter(e.target.value)}
+            className="px-3 py-2 rounded-lg border border-slate-200 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 max-w-xs truncate"
+          >
+            <option value="ALL">Tất cả Bài học (Cấu hình)</option>
+            {allLessons
+              .filter((l) => gradeFilter === 'ALL' || l.gradeLevel === Number(gradeFilter))
+              .sort((a, b) => a.gradeLevel - b.gradeLevel || a.lessonNumber - b.lessonNumber)
+              .map((les) => (
+                <option key={les.id} value={les.title}>
+                  [K{les.gradeLevel}] {les.title}
+                </option>
+              ))}
+          </select>
         </div>
       </div>
 
@@ -887,6 +932,14 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({ currentUser }) => {
                   </span>
                   <span className="font-semibold text-slate-700">Khối {q.gradeLevel}</span>
                   <span className="text-slate-400">·</span>
+                  {q.lessonTitle && (
+                    <>
+                      <span className="font-semibold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200">
+                        📖 {q.lessonTitle}
+                      </span>
+                      <span className="text-slate-400">·</span>
+                    </>
+                  )}
                   <span className="text-slate-600">{q.topic}</span>
                   <span className="text-slate-400">·</span>
                   {getDifficultyBadge(q.difficulty)}
@@ -1130,8 +1183,8 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({ currentUser }) => {
                   <label className="block font-medium text-slate-700 mb-1">Chủ đề kiến thức *</label>
                   <select
                     value={formData.topic}
-                    onChange={(e) => setFormData({ ...formData, topic: e.target.value })}
-                    className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    onChange={(e) => handleTopicChange(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
                   >
                     {topics.map((t) => (
                       <option key={t.id} value={t.name}>
@@ -1153,17 +1206,23 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({ currentUser }) => {
                     onChange={(e) => handleLessonChange(e.target.value)}
                     className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white font-medium text-slate-900"
                   >
-                    <option value="">-- Chọn bài học (Không phải nhập tay) --</option>
+                    <option value="">-- Chọn bài học (Đã cấu hình theo Khối {formData.gradeLevel}) --</option>
                     {allLessons
                       .filter((l) => l.gradeLevel === formData.gradeLevel)
                       .sort((a, b) => a.lessonNumber - b.lessonNumber)
-                      .map((les) => (
-                        <option key={les.id} value={les.title}>
-                          {les.title}
-                        </option>
-                      ))}
+                      .map((les) => {
+                        const top = topics.find((t) => t.id === les.topicId);
+                        return (
+                          <option key={les.id} value={les.title}>
+                            {les.title} {top ? `· [${top.code}]` : ''}
+                          </option>
+                        );
+                      })}
                     <option value="__CUSTOM__">✍️ Nhập tên bài học khác (tùy chỉnh)...</option>
                   </select>
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    💡 Chọn bài học từ danh mục Quản trị cấu hình để tự động điền Chủ đề và Yêu cầu cần đạt.
+                  </p>
 
                   {isCustomLessonMode && (
                     <div className="mt-2 animate-in fade-in">

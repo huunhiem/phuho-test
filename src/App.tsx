@@ -104,6 +104,8 @@ export default function App() {
 
     const validAdminTabs: NavTab[] = [
       'admin_dashboard',
+      'results',
+      'assignments',
       'admin_users',
       'admin_classes',
       'admin_lessons',
@@ -200,6 +202,10 @@ export default function App() {
       switch (activeTab) {
         case 'admin_dashboard':
           return <AdminDashboard onNavigate={setActiveTab} />;
+        case 'results':
+          return <ResultsAndGrading currentUser={currentUser} />;
+        case 'assignments':
+          return <AssignmentManager currentUser={currentUser} />;
         case 'admin_users':
         case 'admin_import':
           return <UserManagement />;

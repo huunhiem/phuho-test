@@ -170,14 +170,14 @@ export const Header: React.FC<HeaderProps> = ({
               <div>
                 <div className="flex items-center gap-2">
                   <span className="font-bold text-slate-900 text-base tracking-tight">
-                    CỔNG KIỂM TRA TRỰC TUYẾN
+                    THCS PHÚ HỒ - CỔNG KIỂM TRA TRỰC TUYẾN
                   </span>
                   <span className="hidden sm:inline-block text-xs font-semibold px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-100">
                     GDPT 2018
                   </span>
                 </div>
                 <div className="text-xs text-slate-500 font-medium">
-                  Trường THCS Phú Hồ
+                  Hệ thống kiểm tra & đánh giá trực tuyến
                 </div>
               </div>
             </div>

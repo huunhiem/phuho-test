@@ -213,7 +213,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
             {/* TÊN HỆ THỐNG VÀ MÔ TẢ (CĂN GIỮA NỘI DUNG) */}
             <div className="space-y-3 text-center w-full">
               <h1 className="text-2xl sm:text-3xl lg:text-4xl font-black text-white tracking-wide uppercase text-center leading-snug">
-                CỔNG KIỂM TRA ĐÁNH GIÁ TRỰC TUYẾN
+                THCS PHÚ HỒ - CỔNG KIỂM TRA TRỰC TUYẾN
               </h1>
               <p className="text-sm sm:text-base text-slate-300 leading-relaxed text-center max-w-xl mx-auto">
                 Nền tảng kiểm tra trực tuyến, tra cứu ngân hàng câu hỏi và quản lý điểm số dành riêng cho Cán bộ quản lý, Giáo viên và Học sinh Trường THCS Phú Hồ.

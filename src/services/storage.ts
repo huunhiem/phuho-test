@@ -770,8 +770,305 @@ export class LMSStorageService {
       s.correctCount,
       s.totalQuestions,
       new Date(s.submittedAt).toLocaleString('vi-VN'),
-      s.status === 'COMPLETED' ? 'Đã hoàn thành' : 'Chờ chấm tự luận'
+      s.isViolationAutoSubmitted ? 'Vi phạm quy chế (Rời tab)' : s.status === 'COMPLETED' ? 'Đã hoàn thành' : 'Chờ chấm tự luận'
     ]);
+
+    return [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
+  }
+
+  /**
+   * Báo cáo chi tiết kết quả từng đề thi: học sinh đã tham gia và chưa tham gia
+   */
+  static getExamParticipationReport(params: {
+    assignmentId?: string;
+    testId?: string;
+    classId?: string;
+  }): {
+    targetTitle: string;
+    targetGrade: number;
+    assignedClasses: string[];
+    allRoster: Array<{
+      id: string;
+      studentCode: string;
+      fullName: string;
+      className: string;
+      classId: string;
+      participated: boolean;
+      submission?: Submission;
+    }>;
+    participatedStudents: Array<{
+      id: string;
+      studentCode: string;
+      fullName: string;
+      className: string;
+      classId: string;
+      submission: Submission;
+    }>;
+    notParticipatedStudents: Array<{
+      id: string;
+      studentCode: string;
+      fullName: string;
+      className: string;
+      classId: string;
+      homeroomTeacherName?: string;
+    }>;
+    stats: {
+      totalAssigned: number;
+      participatedCount: number;
+      notParticipatedCount: number;
+      participatedRate: number;
+      avgScore: number;
+      passRate: number;
+      violationCount: number;
+    };
+  } {
+    const allUsers = this.getUsers();
+    const allClasses = this.getClasses();
+    const allAssignments = this.getAssignments();
+    const allTests = this.getTests();
+    const allSubmissions = this.getSubmissions();
+
+    let targetTitle = 'Tất cả các bài kiểm tra';
+    let targetGrade = 6;
+    let targetClassIds: string[] = [];
+
+    let currentAssignment: Assignment | undefined;
+    let currentTest: Test | undefined;
+
+    if (params.assignmentId && params.assignmentId !== 'ALL') {
+      currentAssignment = allAssignments.find((a) => a.id === params.assignmentId);
+      if (currentAssignment) {
+        targetTitle = currentAssignment.testTitle;
+        targetGrade = currentAssignment.gradeLevel;
+        targetClassIds = [...currentAssignment.classIds];
+        currentTest = allTests.find((t) => t.id === currentAssignment?.testId);
+      }
+    } else if (params.testId && params.testId !== 'ALL') {
+      currentTest = allTests.find((t) => t.id === params.testId);
+      if (currentTest) {
+        targetTitle = currentTest.title;
+        targetGrade = currentTest.gradeLevel;
+        // Lấy tất cả lớp được giao bài của test này
+        const matchingAssigns = allAssignments.filter((a) => a.testId === currentTest?.id);
+        if (matchingAssigns.length > 0) {
+          targetClassIds = Array.from(new Set(matchingAssigns.flatMap((a) => a.classIds)));
+        } else {
+          // Lấy tất cả lớp thuộc khối này
+          targetClassIds = allClasses.filter((c) => c.gradeId === `grade-${currentTest?.gradeLevel}`).map((c) => c.id);
+        }
+      }
+    }
+
+    // Nếu lọc theo 1 lớp cụ thể
+    if (params.classId && params.classId !== 'ALL') {
+      targetClassIds = [params.classId];
+    }
+
+    // Lọc bài nộp liên quan
+    const matchingSubs = allSubmissions.filter((s) => {
+      if (currentAssignment) {
+        if (s.assignmentId !== currentAssignment.id && s.testId !== currentAssignment.testId) return false;
+      } else if (currentTest) {
+        if (s.testId !== currentTest.id) return false;
+      }
+      if (params.classId && params.classId !== 'ALL') {
+        if (s.classId !== params.classId) return false;
+      } else if (targetClassIds.length > 0) {
+        if (!targetClassIds.includes(s.classId)) return false;
+      }
+      return true;
+    });
+
+    // Lấy danh sách học sinh thuộc các lớp được giao
+    const studentUsers = allUsers.filter((u) => {
+      if (u.role !== 'STUDENT') return false;
+      if (targetClassIds.length > 0) {
+        return targetClassIds.includes(u.classId || '');
+      }
+      // Nếu chọn ALL tất cả
+      return true;
+    });
+
+    // Tìm tên lớp tương ứng
+    const getClassName = (cId?: string, fallbackName?: string) => {
+      if (fallbackName) return fallbackName;
+      const found = allClasses.find((c) => c.id === cId);
+      return found ? found.name : 'Chưa xếp lớp';
+    };
+
+    const getHomeroomTeacher = (cId?: string) => {
+      const found = allClasses.find((c) => c.id === cId);
+      return found?.homeroomTeacherName || 'Chưa phân công';
+    };
+
+    const participatedList: Array<{
+      id: string;
+      studentCode: string;
+      fullName: string;
+      className: string;
+      classId: string;
+      submission: Submission;
+    }> = [];
+
+    const notParticipatedList: Array<{
+      id: string;
+      studentCode: string;
+      fullName: string;
+      className: string;
+      classId: string;
+      homeroomTeacherName?: string;
+    }> = [];
+
+    const submittedStudentIds = new Set<string>();
+    const submittedStudentCodes = new Set<string>();
+
+    matchingSubs.forEach((sub) => {
+      submittedStudentIds.add(sub.studentId);
+      if (sub.studentCode) submittedStudentCodes.add(sub.studentCode.toLowerCase());
+      participatedList.push({
+        id: sub.studentId,
+        studentCode: sub.studentCode,
+        fullName: sub.studentName,
+        className: sub.className,
+        classId: sub.classId,
+        submission: sub
+      });
+    });
+
+    studentUsers.forEach((stu) => {
+      const hasTaken =
+        submittedStudentIds.has(stu.id) ||
+        (stu.studentCode && submittedStudentCodes.has(stu.studentCode.toLowerCase()));
+
+      if (!hasTaken) {
+        notParticipatedList.push({
+          id: stu.id,
+          studentCode: stu.studentCode || stu.username,
+          fullName: stu.fullName,
+          className: getClassName(stu.classId),
+          classId: stu.classId || '',
+          homeroomTeacherName: getHomeroomTeacher(stu.classId)
+        });
+      }
+    });
+
+    const allRoster = [
+      ...participatedList.map((p) => ({
+        id: p.id,
+        studentCode: p.studentCode,
+        fullName: p.fullName,
+        className: p.className,
+        classId: p.classId,
+        participated: true,
+        submission: p.submission
+      })),
+      ...notParticipatedList.map((np) => ({
+        id: np.id,
+        studentCode: np.studentCode,
+        fullName: np.fullName,
+        className: np.className,
+        classId: np.classId,
+        participated: false,
+        submission: undefined
+      }))
+    ];
+
+    const totalAssigned = allRoster.length;
+    const participatedCount = participatedList.length;
+    const notParticipatedCount = notParticipatedList.length;
+    const participatedRate = totalAssigned > 0 ? Math.round((participatedCount / totalAssigned) * 100) : 0;
+
+    const sumScore = participatedList.reduce((acc, curr) => acc + curr.submission.score, 0);
+    const avgScore = participatedCount > 0 ? Number((sumScore / participatedCount).toFixed(1)) : 0;
+    const passedCount = participatedList.filter((p) => p.submission.score >= 5.0).length;
+    const passRate = participatedCount > 0 ? Math.round((passedCount / participatedCount) * 100) : 0;
+    const violationCount = participatedList.filter((p) => p.submission.isViolationAutoSubmitted).length;
+
+    const assignedClassNames = targetClassIds.map((cid) => getClassName(cid));
+
+    return {
+      targetTitle,
+      targetGrade,
+      assignedClasses: assignedClassNames,
+      allRoster,
+      participatedStudents: participatedList,
+      notParticipatedStudents: notParticipatedList,
+      stats: {
+        totalAssigned,
+        participatedCount,
+        notParticipatedCount,
+        participatedRate,
+        avgScore,
+        passRate,
+        violationCount
+      }
+    };
+  }
+
+  /**
+   * Xuất danh sách kết quả bài thi bao gồm cả học sinh tham gia và chưa tham gia
+   */
+  static exportExamParticipationCSV(params: {
+    assignmentId?: string;
+    testId?: string;
+    classId?: string;
+  }): string {
+    const report = this.getExamParticipationReport(params);
+    const headers = [
+      'STT',
+      'Mã học sinh',
+      'Họ và tên',
+      'Lớp',
+      'Tên bài kiểm tra',
+      'Trạng thái tham gia',
+      'Điểm số',
+      'Xếp loại',
+      'Số câu đúng',
+      'Thời gian nộp',
+      'Ghi chú / Vi phạm'
+    ];
+
+    let index = 1;
+    const rows = report.allRoster.map((item) => {
+      const getRating = (score: number) => {
+        if (score >= 8.5) return 'Giỏi';
+        if (score >= 6.5) return 'Khá';
+        if (score >= 5.0) return 'Đạt';
+        return 'Chưa đạt';
+      };
+
+      if (item.participated && item.submission) {
+        return [
+          index++,
+          item.studentCode,
+          `"${item.fullName}"`,
+          `"Lớp ${item.className}"`,
+          `"${report.targetTitle}"`,
+          'Đã tham gia',
+          item.submission.score.toFixed(1),
+          getRating(item.submission.score),
+          `"${item.submission.correctCount}/${item.submission.totalQuestions}"`,
+          new Date(item.submission.submittedAt).toLocaleString('vi-VN'),
+          item.submission.isViolationAutoSubmitted
+            ? `"${item.submission.violationReason || 'Vi phạm: Rời tab thi'}"`
+            : 'Hoàn thành bình thường'
+        ];
+      } else {
+        return [
+          index++,
+          item.studentCode,
+          `"${item.fullName}"`,
+          `"Lớp ${item.className}"`,
+          `"${report.targetTitle}"`,
+          'Chưa tham gia',
+          '-',
+          'Vắng thi',
+          '-',
+          '-',
+          'Chưa nộp bài / Chưa vào phòng thi'
+        ];
+      }
+    });
 
     return [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
   }

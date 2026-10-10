@@ -22,7 +22,12 @@ import {
   CheckSquare,
   Square,
   Filter,
-  X
+  X,
+  Award,
+  UserX,
+  FileSpreadsheet,
+  Clock,
+  AlertTriangle
 } from 'lucide-react';
 import {
   Test,
@@ -309,6 +314,7 @@ export const MATRIX_PRESETS = [
 export const TestBuilder: React.FC<TestBuilderProps> = ({ currentUser, onTestCreated }) => {
   const [tests, setTests] = useState<Test[]>(() => LMSStorageService.getTests());
   const [questions, setQuestions] = useState<Question[]>(() => LMSStorageService.getQuestions());
+  const [lessons, setLessons] = useState(() => LMSStorageService.getLessons());
 
   useEffect(() => {
     const unsub = onStorageChange((entity) => {
@@ -317,6 +323,9 @@ export const TestBuilder: React.FC<TestBuilderProps> = ({ currentUser, onTestCre
       }
       if (entity === 'tests' || entity === 'all') {
         setTests(LMSStorageService.getTests());
+      }
+      if (entity === 'lessons' || entity === 'all') {
+        setLessons(LMSStorageService.getLessons());
       }
     });
     return () => unsub();
@@ -327,6 +336,11 @@ export const TestBuilder: React.FC<TestBuilderProps> = ({ currentUser, onTestCre
   const [previewTest, setPreviewTest] = useState<Test | null>(null);
   const [deleteTestId, setDeleteTestId] = useState<string | null>(null);
   const [validationError, setValidationError] = useState<string>('');
+
+  // Xem kết quả thi của từng đề kiểm tra
+  const [viewingTestResults, setViewingTestResults] = useState<Test | null>(null);
+  const [testResultTab, setTestResultTab] = useState<'ALL' | 'PARTICIPATED' | 'NOT_PARTICIPATED'>('ALL');
+  const [testResultSearch, setTestResultSearch] = useState('');
 
   // Matrix Grid Configuration
   const [matrixGrid, setMatrixGrid] = useState<MatrixGrid>(() => createDefaultMatrixGrid());
@@ -376,7 +390,7 @@ export const TestBuilder: React.FC<TestBuilderProps> = ({ currentUser, onTestCre
       }
       return a.localeCompare(b, 'vi');
     });
-  }, [testForm.gradeLevel, questions]);
+  }, [testForm.gradeLevel, questions, lessons]);
 
   // Thống kê số lượng câu hỏi hiện có trong kho theo từng bài học
   const questionCountByLesson = useMemo(() => {
@@ -1740,6 +1754,40 @@ export const TestBuilder: React.FC<TestBuilderProps> = ({ currentUser, onTestCre
                     </div>
                     <span className="text-[11px] text-slate-400">Tạo bởi: {test.authorName}</span>
                   </div>
+
+                  {/* Kết quả thi & Tình hình học sinh tham gia */}
+                  {(() => {
+                    const rep = LMSStorageService.getExamParticipationReport({ testId: test.id });
+                    return (
+                      <div className="pt-2.5 border-t border-slate-100 flex items-center justify-between gap-2 flex-wrap text-xs">
+                        <div className="flex items-center gap-1.5 text-[11px]">
+                          <span className="font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                            ✓ Đã thi: {rep.stats.participatedCount}
+                          </span>
+                          <span className="font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
+                            ⏳ Chưa thi: {rep.stats.notParticipatedCount}
+                          </span>
+                          {rep.stats.participatedCount > 0 && (
+                            <span className="text-slate-500 font-medium ml-1">
+                              TB: <strong className="text-indigo-600 font-bold">{rep.stats.avgScore}đ</strong>
+                            </span>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setViewingTestResults(test);
+                            setTestResultTab('ALL');
+                            setTestResultSearch('');
+                          }}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 transition-colors cursor-pointer shadow-2xs"
+                        >
+                          <Award className="w-3.5 h-3.5 text-indigo-600" />
+                          <span>Xem kết quả thi</span>
+                        </button>
+                      </div>
+                    );
+                  })()}
                 </div>
               );
             })
@@ -2071,6 +2119,252 @@ export const TestBuilder: React.FC<TestBuilderProps> = ({ currentUser, onTestCre
           </div>
         </div>
       )}
+
+      {/* Modal Xem kết quả đề thi cho Giáo viên Ra đề thi */}
+      {viewingTestResults && (() => {
+        const testReport = LMSStorageService.getExamParticipationReport({
+          testId: viewingTestResults.id
+        });
+
+        let list = testReport.allRoster;
+        if (testResultTab === 'PARTICIPATED') {
+          list = list.filter((i) => i.participated);
+        } else if (testResultTab === 'NOT_PARTICIPATED') {
+          list = list.filter((i) => !i.participated);
+        }
+
+        if (testResultSearch.trim()) {
+          const q = testResultSearch.trim().toLowerCase();
+          list = list.filter(
+            (i) =>
+              i.fullName.toLowerCase().includes(q) ||
+              i.studentCode.toLowerCase().includes(q) ||
+              i.className.toLowerCase().includes(q)
+          );
+        }
+
+        const handleExportTestCSV = () => {
+          const csv = LMSStorageService.exportExamParticipationCSV({
+            testId: viewingTestResults.id
+          });
+          const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.setAttribute('download', `ket_qua_de_thi_${viewingTestResults.id}_${new Date().toISOString().slice(0, 10)}.csv`);
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+        };
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
+            <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-4xl p-6 max-h-[92vh] overflow-y-auto space-y-4 animate-in fade-in zoom-in-95">
+              <div className="flex items-start justify-between border-b border-slate-200 pb-3">
+                <div>
+                  <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-700 text-[11px] font-semibold mb-1">
+                    <Award className="w-3.5 h-3.5" />
+                    <span>Kết quả đề thi (Giáo viên ra đề)</span>
+                  </div>
+                  <h2 className="text-lg font-bold text-slate-900">{viewingTestResults.title}</h2>
+                  <div className="text-xs text-slate-500 mt-1 flex flex-wrap gap-2">
+                    <span>Khối: <strong>Khối {viewingTestResults.gradeLevel}</strong></span>
+                    <span>·</span>
+                    <span>Thời gian: <strong>{viewingTestResults.durationMinutes} phút</strong></span>
+                    <span>·</span>
+                    <span>Số câu: <strong>{viewingTestResults.totalQuestions} câu</strong></span>
+                    <span>·</span>
+                    <span>Thang điểm: <strong>{viewingTestResults.totalPoints}đ</strong></span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleExportTestCSV}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300"
+                  >
+                    <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Xuất Excel</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setViewingTestResults(null)}
+                    className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 text-sm"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+
+              {/* KPI Mini Cards */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
+                  <div className="text-[11px] font-semibold text-slate-500">Tổng học sinh trong diện</div>
+                  <div className="text-xl font-black text-slate-900 mt-0.5">{testReport.stats.totalAssigned}</div>
+                  <div className="text-[10px] text-slate-400">Khối {viewingTestResults.gradeLevel}</div>
+                </div>
+
+                <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200">
+                  <div className="text-[11px] font-semibold text-emerald-700">Đã tham gia</div>
+                  <div className="text-xl font-black text-emerald-700 mt-0.5">{testReport.stats.participatedCount}</div>
+                  <div className="text-[10px] text-emerald-600 font-medium">Tỷ lệ {testReport.stats.participatedRate}%</div>
+                </div>
+
+                <div className="p-3 rounded-xl bg-amber-50 border border-amber-200">
+                  <div className="text-[11px] font-semibold text-amber-700">Chưa tham gia</div>
+                  <div className="text-xl font-black text-amber-700 mt-0.5">{testReport.stats.notParticipatedCount}</div>
+                  <div className="text-[10px] text-amber-600 font-medium">Chiếm {testReport.stats.totalAssigned > 0 ? 100 - testReport.stats.participatedRate : 0}%</div>
+                </div>
+
+                <div className="p-3 rounded-xl bg-indigo-50 border border-indigo-200">
+                  <div className="text-[11px] font-semibold text-indigo-700">Điểm trung bình</div>
+                  <div className="text-xl font-black text-indigo-700 mt-0.5">{testReport.stats.avgScore} <span className="text-xs font-normal">/ 10</span></div>
+                  <div className="text-[10px] text-indigo-600 font-medium">Đạt: {testReport.stats.passRate}%</div>
+                </div>
+              </div>
+
+              {/* Filter Tabs and Search */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setTestResultTab('ALL')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold ${
+                      testResultTab === 'ALL'
+                        ? 'bg-slate-900 text-white'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    Tất cả ({testReport.stats.totalAssigned})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTestResultTab('PARTICIPATED')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold ${
+                      testResultTab === 'PARTICIPATED'
+                        ? 'bg-emerald-600 text-white'
+                        : 'bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
+                    }`}
+                  >
+                    Đã tham gia ({testReport.stats.participatedCount})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTestResultTab('NOT_PARTICIPATED')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold ${
+                      testResultTab === 'NOT_PARTICIPATED'
+                        ? 'bg-amber-600 text-white'
+                        : 'bg-amber-50 text-amber-800 hover:bg-amber-100'
+                    }`}
+                  >
+                    Chưa tham gia ({testReport.stats.notParticipatedCount})
+                  </button>
+                </div>
+
+                <div className="relative w-full sm:w-60">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    placeholder="Tìm tên, mã học sinh..."
+                    value={testResultSearch}
+                    onChange={(e) => setTestResultSearch(e.target.value)}
+                    className="w-full pl-8 pr-3 py-1.5 rounded-lg border border-slate-200 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  />
+                </div>
+              </div>
+
+              {/* Students Table */}
+              <div className="border border-slate-200 rounded-xl overflow-hidden max-h-96 overflow-y-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-semibold sticky top-0">
+                    <tr>
+                      <th className="px-3 py-2.5 text-center w-10">STT</th>
+                      <th className="px-3.5 py-2.5">Mã HS</th>
+                      <th className="px-4 py-2.5">Họ và tên học sinh</th>
+                      <th className="px-3 py-2.5">Lớp</th>
+                      <th className="px-3.5 py-2.5">Trạng thái tham gia</th>
+                      <th className="px-3.5 py-2.5 text-center">Đúng/Tổng</th>
+                      <th className="px-3.5 py-2.5 text-center">Điểm số</th>
+                      <th className="px-3.5 py-2.5">Thời gian nộp</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {list.length === 0 ? (
+                      <tr>
+                        <td colSpan={8} className="px-4 py-8 text-center text-slate-400">
+                          Không có học sinh nào phù hợp.
+                        </td>
+                      </tr>
+                    ) : (
+                      list.map((st, idx) => {
+                        const hasSub = st.participated && st.submission;
+                        const sub = st.submission;
+
+                        return (
+                          <tr
+                            key={st.id + (sub ? sub.id : '-unsub')}
+                            className={!hasSub ? 'bg-amber-50/20' : 'hover:bg-slate-50'}
+                          >
+                            <td className="px-3 py-2.5 text-center text-slate-400">{idx + 1}</td>
+                            <td className="px-3.5 py-2.5 font-mono text-slate-600">{st.studentCode}</td>
+                            <td className="px-4 py-2.5 font-bold text-slate-900">{st.fullName}</td>
+                            <td className="px-3 py-2.5">Lớp {st.className}</td>
+                            <td className="px-3.5 py-2.5">
+                              {hasSub ? (
+                                sub?.isViolationAutoSubmitted ? (
+                                  <span className="inline-flex items-center gap-1 text-[11px] font-bold text-rose-700 bg-rose-50 px-2 py-0.5 rounded border border-rose-200">
+                                    <AlertTriangle className="w-3 h-3 text-rose-600" />
+                                    <span>Vi phạm: Rời tab (Tự nộp)</span>
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                                    <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                                    <span>Đã nộp bài</span>
+                                  </span>
+                                )
+                              ) : (
+                                <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-300">
+                                  <Clock className="w-3 h-3 text-amber-600" />
+                                  <span>Chưa làm bài</span>
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-3.5 py-2.5 text-center">
+                              {sub ? `${sub.correctCount}/${sub.totalQuestions}` : '-'}
+                            </td>
+                            <td className="px-3.5 py-2.5 text-center">
+                              {sub ? (
+                                <span className="font-black text-xs px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                  {sub.score.toFixed(1)}
+                                </span>
+                              ) : (
+                                <span className="text-slate-300">-</span>
+                              )}
+                            </td>
+                            <td className="px-3.5 py-2.5 text-slate-500 text-[11px]">
+                              {sub ? new Date(sub.submittedAt).toLocaleString('vi-VN') : 'Chưa nộp bài'}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="flex justify-end pt-2 border-t border-slate-200">
+                <button
+                  type="button"
+                  onClick={() => setViewingTestResults(null)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200"
+                >
+                  Đóng
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Delete Test Confirmation Dialog */}
       <ConfirmDialog

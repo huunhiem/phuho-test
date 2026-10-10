@@ -71,6 +71,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
       case 'ADMIN':
         return [
           { id: 'admin_dashboard', label: 'Dashboard Quản trị', icon: <LayoutDashboard className="w-5 h-5" /> },
+          { id: 'results', label: 'Kết quả từng đề thi', icon: <Award className="w-5 h-5 text-amber-600" /> },
+          { id: 'assignments', label: 'Quản lý giao đề kiểm tra', icon: <Send className="w-5 h-5 text-indigo-600" /> },
           { id: 'admin_users', label: 'Quản lý Người dùng', icon: <Users className="w-5 h-5" /> },
           { id: 'admin_classes', label: 'Quản lý Khối & Lớp', icon: <Layers className="w-5 h-5" /> },
           { id: 'admin_lessons', label: 'Cấu hình Tên Bài học', icon: <BookOpen className="w-5 h-5" /> },
@@ -96,7 +98,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           { id: 'question_bank', label: 'Ngân hàng câu hỏi', icon: <HelpCircle className="w-5 h-5" /> },
           { id: 'test_builder', label: 'Tạo đề kiểm tra', icon: <FileText className="w-5 h-5" /> },
           { id: 'assignments', label: 'Giao bài theo khối', icon: <Send className="w-5 h-5" /> },
-          { id: 'results', label: 'Kết quả & Chấm điểm', icon: <Award className="w-5 h-5" /> },
+          { id: 'results', label: 'Kết quả từng đề thi & Chấm bài', icon: <Award className="w-5 h-5" /> },
           { id: 'question_analysis', label: 'Phân tích câu hỏi', icon: <BarChart3 className="w-5 h-5" /> }
         ];
 
@@ -107,7 +109,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           { id: 'question_bank', label: 'Ngân hàng câu hỏi', icon: <HelpCircle className="w-5 h-5" /> },
           { id: 'test_builder', label: 'Tạo đề kiểm tra', icon: <FileText className="w-5 h-5" /> },
           { id: 'assignments', label: 'Giao bài kiểm tra', icon: <Send className="w-5 h-5" /> },
-          { id: 'results', label: 'Kết quả & Chấm điểm', icon: <Award className="w-5 h-5" /> },
+          { id: 'results', label: 'Kết quả từng đề thi & Chấm bài', icon: <Award className="w-5 h-5" /> },
           { id: 'question_analysis', label: 'Phân tích câu hỏi', icon: <BarChart3 className="w-5 h-5" /> }
         ];
 
