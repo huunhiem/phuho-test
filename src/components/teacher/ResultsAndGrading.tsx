@@ -8,7 +8,8 @@ import {
   Edit3,
   Eye,
   FileSpreadsheet,
-  AlertCircle
+  AlertCircle,
+  AlertTriangle
 } from 'lucide-react';
 import { Submission, Question, User } from '../../types';
 import { LMSStorageService } from '../../services/storage';
@@ -235,7 +236,14 @@ export const ResultsAndGrading: React.FC<ResultsAndGradingProps> = ({ currentUse
                       </span>
                     </td>
                     <td className="px-4 py-3">
-                      {sub.status === 'COMPLETED' ? (
+                      {sub.isViolationAutoSubmitted ? (
+                        <span
+                          className="inline-flex items-center gap-1 text-[11px] font-semibold text-rose-700 bg-rose-50 px-2 py-0.5 rounded border border-rose-200"
+                          title={sub.violationReason || 'Chuyển tab khi đang làm bài'}
+                        >
+                          <AlertTriangle className="w-3 h-3 text-rose-600" /> Vi phạm: Rời tab (Tự nộp)
+                        </span>
+                      ) : sub.status === 'COMPLETED' ? (
                         <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
                           <CheckCircle2 className="w-3 h-3" /> Đã hoàn thành
                         </span>
@@ -285,6 +293,20 @@ export const ResultsAndGrading: React.FC<ResultsAndGradingProps> = ({ currentUse
                 ✕
               </button>
             </div>
+
+            {gradingSub.isViolationAutoSubmitted && (
+              <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg text-xs text-rose-900 flex items-start gap-2 shadow-2xs">
+                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                <div className="space-y-0.5">
+                  <div className="font-bold text-rose-800">
+                    Cảnh báo vi phạm nội quy: Bài làm này đã bị hệ thống tự động thu hồi & nộp bài!
+                  </div>
+                  <div className="text-rose-700 font-medium">
+                    Lý do: {gradingSub.violationReason || 'Học sinh chuyển tab hoặc rời khỏi cửa sổ phòng thi trong khi đang làm bài.'}
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div className="space-y-4 text-xs">
               {Object.entries(gradingSub.answers).map(([qId, ans], idx) => {

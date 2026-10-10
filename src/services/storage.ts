@@ -310,6 +310,11 @@ export class LMSStorageService {
     notifyChange('lessons');
   }
 
+  static resetLessons(): void {
+    setStored(STORAGE_KEYS.LESSONS, INITIAL_LESSONS);
+    notifyChange('lessons');
+  }
+
   // Questions
   static getQuestions(): Question[] {
     const deletedIds = new Set(getStored<string[]>(STORAGE_KEYS.DELETED_QUESTION_IDS, []));

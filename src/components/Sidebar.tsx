@@ -26,6 +26,7 @@ export type NavTab =
   | 'admin_dashboard'
   | 'admin_users'
   | 'admin_classes'
+  | 'admin_lessons'
   | 'admin_import'
   | 'google_sheets'
   | 'firebase_guide'
@@ -72,6 +73,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           { id: 'admin_dashboard', label: 'Dashboard Quản trị', icon: <LayoutDashboard className="w-5 h-5" /> },
           { id: 'admin_users', label: 'Quản lý Người dùng', icon: <Users className="w-5 h-5" /> },
           { id: 'admin_classes', label: 'Quản lý Khối & Lớp', icon: <Layers className="w-5 h-5" /> },
+          { id: 'admin_lessons', label: 'Cấu hình Tên Bài học', icon: <BookOpen className="w-5 h-5" /> },
           { id: 'question_bank', label: 'Ngân hàng câu hỏi', icon: <HelpCircle className="w-5 h-5" /> },
           { id: 'test_builder', label: 'Đề kiểm tra', icon: <FileText className="w-5 h-5" /> },
           { id: 'admin_import', label: 'Import Excel / CSV', icon: <FileSpreadsheet className="w-5 h-5" /> },

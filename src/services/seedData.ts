@@ -197,25 +197,38 @@ export const INITIAL_LESSONS: Lesson[] = [
   { id: 'les-7-01', topicId: 'top-a', gradeLevel: 7, lessonNumber: 1, title: 'Bài 1: Thiết bị vào - ra và thiết bị lưu trữ', learningOutcomes: 'Phân loại các thiết bị phần cứng máy tính' },
   { id: 'les-7-02', topicId: 'top-a', gradeLevel: 7, lessonNumber: 2, title: 'Bài 2: Hệ điều hành và phần mềm ứng dụng', learningOutcomes: 'Phân biệt hệ điều hành và các ứng dụng' },
   { id: 'les-7-03', topicId: 'top-b', gradeLevel: 7, lessonNumber: 3, title: 'Bài 3: Mạng xã hội và giao tiếp trực tuyến', learningOutcomes: 'Kỹ năng ứng xử văn minh trên mạng xã hội' },
-  { id: 'les-7-04', topicId: 'top-e', gradeLevel: 7, lessonNumber: 4, title: 'Bài 4: Làm quen với bảng tính điện tử', learningOutcomes: 'Nhập dữ liệu và điều hướng trang tính' },
-  { id: 'les-7-05', topicId: 'top-e', gradeLevel: 7, lessonNumber: 5, title: 'Bài 5: Sử dụng công thức và hàm', learningOutcomes: 'Phân biệt địa chỉ tương đối, tuyệt đối' },
-  { id: 'les-7-06', topicId: 'top-e', gradeLevel: 7, lessonNumber: 6, title: 'Bài 6: Các hàm tính toán thông dụng', learningOutcomes: 'Sử dụng thành thạo SUM, AVERAGE, COUNT, MAX, MIN' },
-  { id: 'les-7-07', topicId: 'top-f', gradeLevel: 7, lessonNumber: 7, title: 'Bài 7: Thuật toán tìm kiếm tuần tự và nhị phân', learningOutcomes: 'Thực hiện thuật toán tìm kiếm trên dãy số' },
-  { id: 'les-7-08', topicId: 'top-f', gradeLevel: 7, lessonNumber: 8, title: 'Bài 8: Thuật toán sắp xếp', learningOutcomes: 'Mô phỏng thuật toán sắp xếp nổi bọt và chọn' },
+  { id: 'les-7-04', topicId: 'top-c', gradeLevel: 7, lessonNumber: 4, title: 'Bài 4: Quản lý dữ liệu trong máy tính', learningOutcomes: 'Tổ chức lưu trữ khoa học, sao lưu phòng ngừa mất mát dữ liệu' },
+  { id: 'les-7-05', topicId: 'top-d', gradeLevel: 7, lessonNumber: 5, title: 'Bài 5: Ứng xử có văn hóa và bảo vệ bản quyền', learningOutcomes: 'Tuân thủ luật sở hữu trí tuệ và ứng xử chuẩn mực' },
+  { id: 'les-7-06', topicId: 'top-e', gradeLevel: 7, lessonNumber: 6, title: 'Bài 6: Làm quen với bảng tính điện tử', learningOutcomes: 'Nhập dữ liệu và điều hướng trang tính' },
+  { id: 'les-7-07', topicId: 'top-e', gradeLevel: 7, lessonNumber: 7, title: 'Bài 7: Sử dụng công thức và hàm', learningOutcomes: 'Phân biệt địa chỉ tương đối, tuyệt đối' },
+  { id: 'les-7-08', topicId: 'top-e', gradeLevel: 7, lessonNumber: 8, title: 'Bài 8: Các hàm tính toán thông dụng', learningOutcomes: 'Sử dụng thành thạo SUM, AVERAGE, COUNT, MAX, MIN' },
+  { id: 'les-7-09', topicId: 'top-e', gradeLevel: 7, lessonNumber: 9, title: 'Bài 9: Định dạng và trình bày bảng tính', learningOutcomes: 'Trình bày bảng tính rõ ràng, kẻ khung, căn lề và định dạng số' },
+  { id: 'les-7-10', topicId: 'top-f', gradeLevel: 7, lessonNumber: 10, title: 'Bài 10: Thuật toán tìm kiếm tuần tự', learningOutcomes: 'Mô tả và giải thích được thuật toán tìm kiếm tuần tự' },
+  { id: 'les-7-11', topicId: 'top-f', gradeLevel: 7, lessonNumber: 11, title: 'Bài 11: Thuật toán tìm kiếm nhị phân', learningOutcomes: 'Thực hiện thuật toán tìm kiếm nhị phân trên dãy số đã sắp xếp' },
+  { id: 'les-7-12', topicId: 'top-f', gradeLevel: 7, lessonNumber: 12, title: 'Bài 12: Thuật toán sắp xếp nổi bọt và chọn', learningOutcomes: 'Mô phỏng thuật toán sắp xếp nổi bọt và chọn' },
 
   // Khối 8
   { id: 'les-8-01', topicId: 'top-a', gradeLevel: 8, lessonNumber: 1, title: 'Bài 1: Lịch sử phát triển của máy tính', learningOutcomes: 'Nêu được các thế hệ máy tính điện tử' },
   { id: 'les-8-02', topicId: 'top-b', gradeLevel: 8, lessonNumber: 2, title: 'Bài 2: Thông tin trong môi trường số', learningOutcomes: 'Đánh giá độ tin cậy của thông tin trên Internet' },
-  { id: 'les-8-03', topicId: 'top-e', gradeLevel: 8, lessonNumber: 3, title: 'Bài 3: Bảng tính điện tử nâng cao và biểu đồ', learningOutcomes: 'Vẽ biểu đồ hình cột, đường gấp khúc, hình tròn' },
-  { id: 'les-8-04', topicId: 'top-f', gradeLevel: 8, lessonNumber: 4, title: 'Bài 4: Làm quen với lập trình trực quan', learningOutcomes: 'Khối lệnh, biến và biểu thức toán học' },
-  { id: 'les-8-05', topicId: 'top-f', gradeLevel: 8, lessonNumber: 5, title: 'Bài 5: Cấu trúc lặp', learningOutcomes: 'Sử dụng vòng lặp xác định và không xác định' },
+  { id: 'les-8-03', topicId: 'top-b', gradeLevel: 8, lessonNumber: 3, title: 'Bài 3: Thực hành khai thác thông tin số an toàn', learningOutcomes: 'Kỹ năng tìm kiếm nâng cao và kiểm chứng nguồn tin cậy' },
+  { id: 'les-8-04', topicId: 'top-d', gradeLevel: 8, lessonNumber: 4, title: 'Bài 4: Đạo đức và văn hóa khi sử dụng công nghệ số', learningOutcomes: 'Phòng ngừa lừa đảo, bảo vệ quyền riêng tư cá nhân' },
+  { id: 'les-8-05', topicId: 'top-e', gradeLevel: 8, lessonNumber: 5, title: 'Bài 5: Bảng tính điện tử nâng cao và biểu đồ', learningOutcomes: 'Vẽ biểu đồ hình cột, đường gấp khúc, hình tròn' },
+  { id: 'les-8-06', topicId: 'top-e', gradeLevel: 8, lessonNumber: 6, title: 'Bài 6: Sắp xếp và lọc dữ liệu trong bảng tính', learningOutcomes: 'Sắp xếp dữ liệu đa tiêu chí và trích xuất dữ liệu bằng AutoFilter' },
+  { id: 'les-8-07', topicId: 'top-f', gradeLevel: 8, lessonNumber: 7, title: 'Bài 7: Làm quen với lập trình trực quan', learningOutcomes: 'Khối lệnh, biến và biểu thức toán học trong Scratch' },
+  { id: 'les-8-08', topicId: 'top-f', gradeLevel: 8, lessonNumber: 8, title: 'Bài 8: Cấu trúc rẽ nhánh trong lập trình', learningOutcomes: 'Áp dụng khối lệnh điều kiện nếu... thì và nếu... không thì' },
+  { id: 'les-8-09', topicId: 'top-f', gradeLevel: 8, lessonNumber: 9, title: 'Bài 9: Cấu trúc lặp', learningOutcomes: 'Sử dụng vòng lặp xác định và không xác định' },
+  { id: 'les-8-10', topicId: 'top-f', gradeLevel: 8, lessonNumber: 10, title: 'Bài 10: Xây dựng dự án trò chơi hoặc mô phỏng', learningOutcomes: 'Hoàn thiện sản phẩm phần mềm học tập hoàn chỉnh' },
 
   // Khối 9
-  { id: 'les-9-01', topicId: 'top-a', gradeLevel: 9, lessonNumber: 1, title: 'Bài 1: Vai trò của máy tính trong đời sống', learningOutcomes: 'Tác động của trí tuệ nhân tạo và công nghệ số' },
-  { id: 'les-9-02', topicId: 'top-b', gradeLevel: 9, lessonNumber: 2, title: 'Bài 2: Bảo vệ thông tin và quyền riêng tư', learningOutcomes: 'Phòng ngừa mã độc và tấn công mạng' },
-  { id: 'les-9-03', topicId: 'top-e', gradeLevel: 9, lessonNumber: 3, title: 'Bài 3: Đồ họa và đa phương tiện', learningOutcomes: 'Xử lý hình ảnh và video kỹ thuật số' },
-  { id: 'les-9-04', topicId: 'top-f', gradeLevel: 9, lessonNumber: 4, title: 'Bài 4: Thuật toán và lập trình thực tế', learningOutcomes: 'Giải quyết bài toán thực tế bằng chương trình máy tính' },
-  { id: 'les-9-05', topicId: 'top-d', gradeLevel: 9, lessonNumber: 5, title: 'Bài 5: Hướng nghiệp trong lĩnh vực CNTT', learningOutcomes: 'Tìm hiểu các ngành nghề công nghệ thông tin' }
+  { id: 'les-9-01', topicId: 'top-a', gradeLevel: 9, lessonNumber: 1, title: 'Bài 1: Vai trò của máy tính trong đời sống và xã hội', learningOutcomes: 'Tác động của trí tuệ nhân tạo và công nghệ số đối với đời sống' },
+  { id: 'les-9-02', topicId: 'top-b', gradeLevel: 9, lessonNumber: 2, title: 'Bài 2: Bảo vệ thông tin và an toàn trên không gian mạng', learningOutcomes: 'Phòng ngừa mã độc, tấn công mạng và rủi ro trực tuyến' },
+  { id: 'les-9-03', topicId: 'top-c', gradeLevel: 9, lessonNumber: 3, title: 'Bài 3: Đánh giá chất lượng và độ tin cậy của thông tin', learningOutcomes: 'Phương pháp phân tích và kiểm chứng thông tin đa chiều' },
+  { id: 'les-9-04', topicId: 'top-d', gradeLevel: 9, lessonNumber: 4, title: 'Bài 4: Pháp luật, đạo đức và trách nhiệm công dân số', learningOutcomes: 'Hiểu luật An ninh mạng và trách nhiệm công dân trong môi trường số' },
+  { id: 'les-9-05', topicId: 'top-e', gradeLevel: 9, lessonNumber: 5, title: 'Bài 5: Đồ họa và xử lý hình ảnh số', learningOutcomes: 'Xử lý hình ảnh, chèn chữ nghệ thuật và cắt ghép ảnh kỹ thuật số' },
+  { id: 'les-9-06', topicId: 'top-e', gradeLevel: 9, lessonNumber: 6, title: 'Bài 6: Biên tập video và sản phẩm đa phương tiện', learningOutcomes: 'Sáng tạo clip ngắn phục vụ thuyết trình và học tập' },
+  { id: 'les-9-07', topicId: 'top-f', gradeLevel: 9, lessonNumber: 7, title: 'Bài 7: Thuật toán và mô tả thuật toán nâng cao', learningOutcomes: 'Phân tích độ phức tạp và tối ưu hóa giải thuật giải quyết vấn đề' },
+  { id: 'les-9-08', topicId: 'top-f', gradeLevel: 9, lessonNumber: 8, title: 'Bài 8: Lập trình giải quyết bài toán thực tế', learningOutcomes: 'Giải quyết bài toán thực tế bằng chương trình máy tính' },
+  { id: 'les-9-09', topicId: 'top-d', gradeLevel: 9, lessonNumber: 9, title: 'Bài 9: Hướng nghiệp và các ngành nghề trong kỷ nguyên AI', learningOutcomes: 'Tìm hiểu các ngành nghề công nghệ thông tin và phát triển kỹ năng tương lai' }
 ];
 
 export const INITIAL_QUESTIONS: Question[] = [

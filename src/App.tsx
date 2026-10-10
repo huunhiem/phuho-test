@@ -6,6 +6,7 @@ import { Sidebar, NavTab } from './components/Sidebar';
 import { AdminDashboard } from './components/admin/AdminDashboard';
 import { UserManagement } from './components/admin/UserManagement';
 import { ClassManagement } from './components/admin/ClassManagement';
+import { LessonManagement } from './components/admin/LessonManagement';
 import { TeacherDashboard } from './components/teacher/TeacherDashboard';
 import { TeacherClasses } from './components/teacher/TeacherClasses';
 import { QuestionBank } from './components/teacher/QuestionBank';
@@ -105,6 +106,7 @@ export default function App() {
       'admin_dashboard',
       'admin_users',
       'admin_classes',
+      'admin_lessons',
       'question_bank',
       'test_builder',
       'admin_import',
@@ -203,6 +205,8 @@ export default function App() {
           return <UserManagement />;
         case 'admin_classes':
           return <ClassManagement />;
+        case 'admin_lessons':
+          return <LessonManagement />;
         case 'google_sheets':
           return <GoogleSheetManager currentUser={currentUser} />;
         case 'firebase_guide':

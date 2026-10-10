@@ -232,6 +232,9 @@ export interface Submission {
   status: 'IN_PROGRESS' | 'COMPLETED' | 'PENDING_ESSAY_GRADING';
   gradedBy?: string;
   gradedAt?: string;
+  isViolationAutoSubmitted?: boolean; // Tự động nộp bài do vi phạm quy chế (chuyển tab)
+  violationReason?: string; // Lý do vi phạm (ví dụ: Chuyển tab / rời khỏi màn hình kiểm tra)
+  tabSwitchCount?: number; // Số lần phát hiện chuyển tab
 }
 
 export interface QuestionAnalysisItem {

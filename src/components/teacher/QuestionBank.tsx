@@ -23,7 +23,7 @@ import {
   AlertTriangle,
   Key
 } from 'lucide-react';
-import { Question, QuestionDifficulty, QuestionType, User, OptionItem, TrueFalseStatement } from '../../types';
+import { Question, QuestionDifficulty, QuestionType, User, OptionItem, TrueFalseStatement, Lesson } from '../../types';
 import { LMSStorageService } from '../../services/storage';
 import { onStorageChange } from '../../services/storageEvents';
 import { GeminiService } from '../../services/geminiService';
@@ -75,6 +75,10 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({ currentUser }) => {
   const [selectedImageFile, setSelectedImageFile] = useState<File | null>(null);
   const [googleConnected, setGoogleConnected] = useState<boolean>(() => Boolean(getGoogleAccessToken()));
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Lesson list from system configuration (Quản trị cấu hình bài học theo từng khối)
+  const [allLessons, setAllLessons] = useState<Lesson[]>(() => LMSStorageService.getLessons());
+  const [isCustomLessonMode, setIsCustomLessonMode] = useState(false);
 
   // Form State
   const [formData, setFormData] = useState<{
@@ -133,6 +137,9 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({ currentUser }) => {
       if (entity === 'questions' || entity === 'all') {
         refreshQuestions();
       }
+      if (entity === 'lessons' || entity === 'all') {
+        setAllLessons(LMSStorageService.getLessons());
+      }
     });
     return () => {
       unsubscribe();
@@ -163,13 +170,18 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({ currentUser }) => {
   const handleOpenAdd = () => {
     setEditingQuestion(null);
     setUploadImageStatus('');
+    const grade6Lessons = allLessons.filter((l) => l.gradeLevel === 6).sort((a, b) => a.lessonNumber - b.lessonNumber);
+    const firstLesson = grade6Lessons[0];
+    const matchedTopic = firstLesson ? topics.find((t) => t.id === firstLesson.topicId) : null;
+    setIsCustomLessonMode(false);
+
     setFormData({
       code: `TH6-A-${Math.floor(10 + Math.random() * 90)}`,
       content: '',
       gradeLevel: 6,
-      topic: 'Chủ đề A: Máy tính và cộng đồng',
-      lessonTitle: 'Bài 1: Thông tin và dữ liệu',
-      learningOutcome: 'Nhận biết thiết bị vào - ra cơ bản',
+      topic: matchedTopic ? matchedTopic.name : 'Chủ đề A: Máy tính và cộng đồng',
+      lessonTitle: firstLesson ? firstLesson.title : 'Bài 1: Thông tin và dữ liệu',
+      learningOutcome: firstLesson?.learningOutcomes || 'Nhận biết được thông tin, dữ liệu và các thiết bị vào ra cơ bản',
       difficulty: 'BIET',
       type: 'SINGLE_CHOICE',
       options: [
@@ -197,6 +209,11 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({ currentUser }) => {
   const handleOpenEdit = (q: Question) => {
     setEditingQuestion(q);
     setUploadImageStatus(q.imageDriveUrl ? 'Đã lưu trên Google Drive' : '');
+
+    const lessonsInGrade = allLessons.filter((l) => l.gradeLevel === q.gradeLevel);
+    const isConfiguredLesson = lessonsInGrade.some((l) => l.title === q.lessonTitle);
+    setIsCustomLessonMode(!isConfiguredLesson && Boolean(q.lessonTitle));
+
     setFormData({
       code: q.code,
       content: q.content,
@@ -223,6 +240,49 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({ currentUser }) => {
     });
     setIsModalOpen(true);
   };
+
+  const handleGradeChange = (newGrade: number) => {
+    const lessonsInNewGrade = allLessons.filter((l) => l.gradeLevel === newGrade).sort((a, b) => a.lessonNumber - b.lessonNumber);
+    const firstLesson = lessonsInNewGrade[0];
+    const matchedTopic = firstLesson ? topics.find((t) => t.id === firstLesson.topicId) : null;
+    setIsCustomLessonMode(false);
+
+    setFormData((prev) => ({
+      ...prev,
+      gradeLevel: newGrade,
+      code: `TH${newGrade}-A-${Math.floor(10 + Math.random() * 90)}`,
+      lessonTitle: firstLesson ? firstLesson.title : prev.lessonTitle,
+      topic: matchedTopic ? matchedTopic.name : prev.topic,
+      learningOutcome: firstLesson?.learningOutcomes || prev.learningOutcome
+    }));
+  };
+
+  const handleLessonChange = (selectedVal: string) => {
+    if (selectedVal === '__CUSTOM__') {
+      setIsCustomLessonMode(true);
+      return;
+    }
+    setIsCustomLessonMode(false);
+    const matched = allLessons.find(
+      (l) => l.gradeLevel === formData.gradeLevel && l.title === selectedVal
+    );
+    if (matched) {
+      const matchedTopic = topics.find((t) => t.id === matchedTopicId(matched.topicId));
+      setFormData((prev) => ({
+        ...prev,
+        lessonTitle: matched.title,
+        topic: matchedTopic ? matchedTopic.name : prev.topic,
+        learningOutcome: matched.learningOutcomes || prev.learningOutcome
+      }));
+    } else {
+      setFormData((prev) => ({
+        ...prev,
+        lessonTitle: selectedVal
+      }));
+    }
+  };
+
+  const matchedTopicId = (tId: string) => tId;
 
   const handleImageFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1015,7 +1075,7 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({ currentUser }) => {
                   <label className="block font-medium text-slate-700 mb-1">Khối lớp *</label>
                   <select
                     value={formData.gradeLevel}
-                    onChange={(e) => setFormData({ ...formData, gradeLevel: Number(e.target.value) })}
+                    onChange={(e) => handleGradeChange(Number(e.target.value))}
                     className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   >
                     <option value={6}>Khối 6</option>
@@ -1082,14 +1142,40 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({ currentUser }) => {
                 </div>
 
                 <div>
-                  <label className="block font-medium text-slate-700 mb-1">Tên bài học</label>
-                  <input
-                    type="text"
-                    value={formData.lessonTitle}
-                    onChange={(e) => setFormData({ ...formData, lessonTitle: e.target.value })}
-                    placeholder="Bài 1: Thông tin và dữ liệu"
-                    className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                  />
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block font-medium text-slate-700">Tên bài học *</label>
+                    <span className="text-[10px] text-indigo-700 bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 rounded font-medium">
+                      Cấu hình sẵn Khối {formData.gradeLevel}
+                    </span>
+                  </div>
+                  <select
+                    value={isCustomLessonMode ? '__CUSTOM__' : formData.lessonTitle}
+                    onChange={(e) => handleLessonChange(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white font-medium text-slate-900"
+                  >
+                    <option value="">-- Chọn bài học (Không phải nhập tay) --</option>
+                    {allLessons
+                      .filter((l) => l.gradeLevel === formData.gradeLevel)
+                      .sort((a, b) => a.lessonNumber - b.lessonNumber)
+                      .map((les) => (
+                        <option key={les.id} value={les.title}>
+                          {les.title}
+                        </option>
+                      ))}
+                    <option value="__CUSTOM__">✍️ Nhập tên bài học khác (tùy chỉnh)...</option>
+                  </select>
+
+                  {isCustomLessonMode && (
+                    <div className="mt-2 animate-in fade-in">
+                      <input
+                        type="text"
+                        value={formData.lessonTitle}
+                        onChange={(e) => setFormData({ ...formData, lessonTitle: e.target.value })}
+                        placeholder="Nhập tên bài học tùy chỉnh..."
+                        className="w-full px-3 py-2 rounded-lg border border-indigo-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-indigo-50/30 font-medium"
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
 

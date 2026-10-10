@@ -118,6 +118,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onNavigate }) =>
           </button>
           <button
             type="button"
+            onClick={() => onNavigate('admin_lessons')}
+            className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-lg transition-colors border border-purple-200 cursor-pointer"
+          >
+            <BookOpen className="w-4 h-4" />
+            <span>Cấu hình Bài học</span>
+          </button>
+          <button
+            type="button"
             onClick={() => onNavigate('admin_import')}
             className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-colors border border-indigo-200 cursor-pointer"
           >
