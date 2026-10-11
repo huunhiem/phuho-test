@@ -20,10 +20,10 @@ export class GeminiService {
       params.difficulty === 'BIET' ? 'Nhận biết' : params.difficulty === 'HIEU' ? 'Thông hiểu' : 'Vận dụng';
 
     const sampleTopics: Record<number, string[]> = {
-      6: ['Chủ đề A: Máy tính và cộng đồng', 'Chủ đề B: Mạng máy tính và Internet', 'Chủ đề F: Giải quyết vấn đề với thuật toán'],
-      7: ['Chủ đề E: Bảng tính điện tử Excel', 'Chủ đề F: Thuật toán tìm kiếm tuần tự và nhị phân'],
-      8: ['Chủ đề A: Lịch sử máy tính', 'Chủ đề F: Lập trình với ngôn ngữ trực quan Scratch/Python'],
-      9: ['Chủ đề B: Mạng máy tính và dịch vụ đám mây', 'Chủ đề F: Giải quyết bài toán trên máy tính']
+      6: ['Chủ đề 1: Máy tính và cộng đồng', 'Chủ đề 2: Mạng máy tính và Internet', 'Chủ đề 6: Giải quyết vấn đề với sự trợ giúp của máy tính'],
+      7: ['Chủ đề 1: Máy tính và cộng đồng', 'Chủ đề 4: Ứng dụng tin học', 'Chủ đề 5: Giải quyết vấn đề với sự trợ giúp của máy tính'],
+      8: ['Chủ đề 1: Máy tính và cộng đồng', 'Chủ đề 4: Ứng dụng tin học', 'Chủ đề 5: Giải quyết vấn đề với sự trợ giúp của máy tính'],
+      9: ['Chủ đề 1: Máy tính và cộng đồng', 'Chủ đề 4: Ứng dụng tin học', 'Chủ đề 5: Giải quyết vấn đề với sự trợ giúp của máy tính']
     };
 
     // Return a curriculum-aligned question template

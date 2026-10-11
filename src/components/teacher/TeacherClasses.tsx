@@ -12,7 +12,12 @@ export const TeacherClasses: React.FC<TeacherClassesProps> = ({ currentUser }) =
   const isPrivileged = currentUser.role === 'ADMIN' || currentUser.role === 'PRINCIPAL';
   const classes = isPrivileged
     ? allClasses
-    : allClasses.filter((c) => currentUser.assignedClassIds?.includes(c.id));
+    : allClasses.filter((c) =>
+        currentUser.assignedClassIds?.includes(c.id) ||
+        c.homeroomTeacherId === currentUser.id ||
+        c.subjectTeacherId === currentUser.id ||
+        c.assignedTeacherIds?.includes(currentUser.id)
+      );
 
   const users = LMSStorageService.getUsers();
   const submissions = LMSStorageService.getSubmissions();

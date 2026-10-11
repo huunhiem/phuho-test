@@ -103,7 +103,7 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({ currentUser }) => {
     code: '',
     content: '',
     gradeLevel: 6,
-    topic: 'Chủ đề A: Máy tính và cộng đồng',
+    topic: 'Chủ đề 1: Máy tính và cộng đồng',
     lessonTitle: 'Bài 1: Thông tin và thu nhận thông tin',
     learningOutcome: 'Nhận biết được vai trò của thông tin trong đời sống',
     difficulty: 'BIET',
@@ -186,7 +186,7 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({ currentUser }) => {
       code: `TH${targetGrade}-A-${Math.floor(10 + Math.random() * 90)}`,
       content: '',
       gradeLevel: targetGrade,
-      topic: matchedTopic ? matchedTopic.name : 'Chủ đề A: Máy tính và cộng đồng',
+      topic: matchedTopic ? matchedTopic.name : 'Chủ đề 1: Máy tính và cộng đồng',
       lessonTitle: firstLesson ? firstLesson.title : 'Bài 1: Thông tin và dữ liệu',
       learningOutcome: firstLesson?.learningOutcomes || 'Nhận biết được thông tin, dữ liệu và các thiết bị vào ra cơ bản',
       difficulty: 'BIET',
@@ -546,7 +546,7 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({ currentUser }) => {
           code: formData.code,
           content: formData.content,
           gradeLevel: Number(formData.gradeLevel) || 6,
-          topic: formData.topic || 'Chủ đề A: Máy tính và cộng đồng',
+          topic: formData.topic || 'Chủ đề 1: Máy tính và cộng đồng',
           lessonTitle: formData.lessonTitle || 'Bài 1: Thông tin và dữ liệu',
           learningOutcome: formData.learningOutcome || 'Chuẩn kiến thức GDPT 2018',
           difficulty: formData.difficulty || 'BIET',
@@ -583,7 +583,7 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({ currentUser }) => {
           code: formData.code || `TH${formData.gradeLevel}-00${Math.floor(10 + Math.random() * 90)}`,
           content: formData.content,
           gradeLevel: Number(formData.gradeLevel) || 6,
-          topic: formData.topic || 'Chủ đề A: Máy tính và cộng đồng',
+          topic: formData.topic || 'Chủ đề 1: Máy tính và cộng đồng',
           lessonTitle: formData.lessonTitle || 'Bài 1: Thông tin và dữ liệu',
           learningOutcome: formData.learningOutcome || 'Chuẩn kiến thức GDPT 2018',
           difficulty: formData.difficulty || 'BIET',
@@ -885,13 +885,14 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({ currentUser }) => {
             onChange={(e) => setTopicFilter(e.target.value)}
             className="px-3 py-2 rounded-lg border border-slate-200 bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
           >
-            <option value="ALL">Tất cả Chủ đề (A - F)</option>
-            <option value="Chủ đề A">Chủ đề A</option>
-            <option value="Chủ đề B">Chủ đề B</option>
-            <option value="Chủ đề C">Chủ đề C</option>
-            <option value="Chủ đề D">Chủ đề D</option>
-            <option value="Chủ đề E">Chủ đề E</option>
-            <option value="Chủ đề F">Chủ đề F</option>
+            <option value="ALL">Tất cả Chủ đề (Kết nối tri thức)</option>
+            {topics
+              .filter((t) => gradeFilter === 'ALL' || t.gradeLevel === Number(gradeFilter))
+              .map((t) => (
+                <option key={t.id} value={t.name}>
+                  {gradeFilter === 'ALL' ? `[K${t.gradeLevel}] ` : ''}{t.name}
+                </option>
+              ))}
           </select>
 
           <select
@@ -1186,11 +1187,13 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({ currentUser }) => {
                     onChange={(e) => handleTopicChange(e.target.value)}
                     className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
                   >
-                    {topics.map((t) => (
-                      <option key={t.id} value={t.name}>
-                        {t.name}
-                      </option>
-                    ))}
+                    {topics
+                      .filter((t) => t.gradeLevel === formData.gradeLevel)
+                      .map((t) => (
+                        <option key={t.id} value={t.name}>
+                          {t.name}
+                        </option>
+                      ))}
                   </select>
                 </div>
 

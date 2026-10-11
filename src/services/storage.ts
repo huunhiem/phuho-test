@@ -74,6 +74,68 @@ function setStored<T>(key: string, value: T): void {
   }
 }
 
+// Hàm chuẩn hóa và ánh xạ Chủ đề môn Tin học theo Bộ sách Kết nối tri thức và cuộc sống (K6-K9)
+export function normalizeKNTTTopic(rawTopic: string, gradeLevel: number = 6): string {
+  const t = (rawTopic || '').trim();
+  const lower = t.toLowerCase();
+
+  // Khớp chính xác nếu đã đúng định dạng Chủ đề 1..6 của KNTT
+  if (lower.startsWith('chủ đề 1') || lower.startsWith('chu de 1')) {
+    return 'Chủ đề 1: Máy tính và cộng đồng';
+  }
+  if (lower.startsWith('chủ đề 2') || lower.startsWith('chu de 2')) {
+    if (gradeLevel === 6) return 'Chủ đề 2: Mạng máy tính và Internet';
+    return 'Chủ đề 2: Tổ chức lưu trữ, tìm kiếm và trao đổi thông tin';
+  }
+  if (lower.startsWith('chủ đề 3') || lower.startsWith('chu de 3')) {
+    if (gradeLevel === 6) return 'Chủ đề 3: Tổ chức lưu trữ, tìm kiếm và trao đổi thông tin';
+    return 'Chủ đề 3: Đạo đức, pháp luật và văn hoá trong môi trường số';
+  }
+  if (lower.startsWith('chủ đề 4') || lower.startsWith('chu de 4')) {
+    if (gradeLevel === 6) return 'Chủ đề 4: Đạo đức, pháp luật và văn hoá trong môi trường số';
+    return 'Chủ đề 4: Ứng dụng tin học';
+  }
+  if (lower.startsWith('chủ đề 5') || lower.startsWith('chu de 5')) {
+    if (gradeLevel === 6) return 'Chủ đề 5: Ứng dụng tin học';
+    return 'Chủ đề 5: Giải quyết vấn đề với sự trợ giúp của máy tính';
+  }
+  if (lower.startsWith('chủ đề 6') || lower.startsWith('chu de 6')) {
+    if (gradeLevel === 6) return 'Chủ đề 6: Giải quyết vấn đề với sự trợ giúp của máy tính';
+    return 'Chủ đề 6: Hướng nghiệp với tin học';
+  }
+
+  // Chuyển đổi nâng cấp từ bộ cũ (Chủ đề A..G hoặc tên chữ) sang bộ KNTT
+  if (lower.includes('chủ đề a') || lower.includes('chu de a') || lower.includes('máy tính và cộng đồng') || lower.includes('lịch sử máy tính')) {
+    return 'Chủ đề 1: Máy tính và cộng đồng';
+  }
+  if (lower.includes('chủ đề b') || lower.includes('chu de b') || lower.includes('mạng máy tính') || lower.includes('internet')) {
+    if (gradeLevel === 6) return 'Chủ đề 2: Mạng máy tính và Internet';
+    return 'Chủ đề 2: Tổ chức lưu trữ, tìm kiếm và trao đổi thông tin';
+  }
+  if (lower.includes('chủ đề c') || lower.includes('chu de c') || lower.includes('tổ chức lưu trữ') || lower.includes('trao đổi thông tin')) {
+    if (gradeLevel === 6) return 'Chủ đề 3: Tổ chức lưu trữ, tìm kiếm và trao đổi thông tin';
+    return 'Chủ đề 2: Tổ chức lưu trữ, tìm kiếm và trao đổi thông tin';
+  }
+  if (lower.includes('chủ đề d') || lower.includes('chu de d') || lower.includes('đạo đức') || lower.includes('bản quyền') || lower.includes('pháp luật')) {
+    if (gradeLevel === 6) return 'Chủ đề 4: Đạo đức, pháp luật và văn hoá trong môi trường số';
+    return 'Chủ đề 3: Đạo đức, pháp luật và văn hoá trong môi trường số';
+  }
+  if (lower.includes('chủ đề e') || lower.includes('chu de e') || lower.includes('ứng dụng tin học') || lower.includes('bảng tính')) {
+    if (gradeLevel === 6) return 'Chủ đề 5: Ứng dụng tin học';
+    return 'Chủ đề 4: Ứng dụng tin học';
+  }
+  if (lower.includes('chủ đề f') || lower.includes('chu de f') || lower.includes('giải quyết vấn đề') || lower.includes('thuật toán') || lower.includes('lập trình') || lower.includes('scratch') || lower.includes('python')) {
+    if (gradeLevel === 6) return 'Chủ đề 6: Giải quyết vấn đề với sự trợ giúp của máy tính';
+    return 'Chủ đề 5: Giải quyết vấn đề với sự trợ giúp của máy tính';
+  }
+  if (lower.includes('chủ đề g') || lower.includes('chu de g') || lower.includes('hướng nghiệp')) {
+    return 'Chủ đề 6: Hướng nghiệp với tin học';
+  }
+
+  // Mặc định
+  return 'Chủ đề 1: Máy tính và cộng đồng';
+}
+
 export class LMSStorageService {
   // Current logged in user
   static getCurrentUser(): User | null {
@@ -227,6 +289,88 @@ export class LMSStorageService {
     notifyChange('classes');
   }
 
+  // Phân công giáo viên phụ trách các lớp học
+  static assignTeacherToClasses(teacherId: string, classIds: string[]): void {
+    const users = this.getUsers();
+    const teacher = users.find((u) => u.id === teacherId);
+    const updatedUsers = users.map((u) => {
+      if (u.id === teacherId) {
+        return { ...u, assignedClassIds: classIds };
+      }
+      return u;
+    });
+    setStored(STORAGE_KEYS.USERS, updatedUsers);
+
+    const classes = this.getClasses();
+    const updatedClasses = classes.map((c) => {
+      const isAssigned = classIds.includes(c.id);
+      const assignedSet = new Set(c.assignedTeacherIds || []);
+      if (isAssigned) {
+        assignedSet.add(teacherId);
+        return {
+          ...c,
+          assignedTeacherIds: Array.from(assignedSet),
+          subjectTeacherId: c.subjectTeacherId || teacherId,
+          subjectTeacherName: c.subjectTeacherName || teacher?.fullName
+        };
+      } else {
+        assignedSet.delete(teacherId);
+        return {
+          ...c,
+          assignedTeacherIds: Array.from(assignedSet),
+          subjectTeacherId: c.subjectTeacherId === teacherId ? undefined : c.subjectTeacherId,
+          subjectTeacherName: c.subjectTeacherId === teacherId ? undefined : c.subjectTeacherName
+        };
+      }
+    });
+    setStored(STORAGE_KEYS.CLASSES, updatedClasses);
+    notifyChange('classes');
+    notifyChange('users');
+  }
+
+  // Cập nhật lớp học kèm danh sách giáo viên phân công
+  static updateClassWithTeachers(cls: ClassRoom, assignedTeacherIds: string[]): void {
+    const users = this.getUsers();
+    const teachers = users.filter((u) => u.role === 'TEACHER' || u.role === 'DEPARTMENT_HEAD');
+    const assignedNames = teachers
+      .filter((t) => assignedTeacherIds.includes(t.id))
+      .map((t) => t.fullName)
+      .join(', ');
+
+    const updatedCls: ClassRoom = {
+      ...cls,
+      assignedTeacherIds,
+      subjectTeacherName: assignedNames || cls.subjectTeacherName
+    };
+    this.updateClass(updatedCls);
+
+    let usersUpdated = false;
+    const updatedUsers = users.map((u) => {
+      if (u.role === 'TEACHER' || u.role === 'DEPARTMENT_HEAD') {
+        const currentClasses = new Set(u.assignedClassIds || []);
+        if (assignedTeacherIds.includes(u.id)) {
+          if (!currentClasses.has(cls.id)) {
+            currentClasses.add(cls.id);
+            usersUpdated = true;
+            return { ...u, assignedClassIds: Array.from(currentClasses) };
+          }
+        } else {
+          if (currentClasses.has(cls.id)) {
+            currentClasses.delete(cls.id);
+            usersUpdated = true;
+            return { ...u, assignedClassIds: Array.from(currentClasses) };
+          }
+        }
+      }
+      return u;
+    });
+
+    if (usersUpdated) {
+      setStored(STORAGE_KEYS.USERS, updatedUsers);
+      notifyChange('users');
+    }
+  }
+
   // Deleted user IDs helper
   static getDeletedUserIds(): Set<string> {
     const list = getStored<string[]>(STORAGE_KEYS.DELETED_USER_IDS, []);
@@ -315,13 +459,38 @@ export class LMSStorageService {
   }
 
   // Topics
-  static getTopics(): Topic[] {
-    return getStored<Topic[]>(STORAGE_KEYS.TOPICS, INITIAL_TOPICS);
+  static getTopics(gradeLevel?: number): Topic[] {
+    const stored = getStored<Topic[]>(STORAGE_KEYS.TOPICS, INITIAL_TOPICS);
+    // Tự động nâng cấp sang danh mục 23 Chủ đề Kết nối tri thức và cuộc sống môn Tin học K6, K7, K8, K9
+    const hasOldTopics = !Array.isArray(stored) || stored.some((t) => t.name.includes('Chủ đề A') || t.name.includes('Chủ đề B') || t.id.startsWith('top-a') || !t.id.startsWith('top-'));
+    const isMissingTopics = Array.isArray(stored) && stored.length !== INITIAL_TOPICS.length;
+    if (hasOldTopics || isMissingTopics || !stored.some((t) => t.id.startsWith('top-6-') || t.id.startsWith('top-7-') || t.id.startsWith('top-8-') || t.id.startsWith('top-9-'))) {
+      setStored(STORAGE_KEYS.TOPICS, INITIAL_TOPICS);
+      return gradeLevel ? INITIAL_TOPICS.filter((t) => t.gradeLevel === gradeLevel) : INITIAL_TOPICS;
+    }
+    if (gradeLevel) {
+      return stored.filter((t) => t.gradeLevel === gradeLevel);
+    }
+    return stored;
+  }
+
+  static resetTopics(): void {
+    setStored(STORAGE_KEYS.TOPICS, INITIAL_TOPICS);
+    notifyChange('topics');
   }
 
   // Lessons
-  static getLessons(): Lesson[] {
-    return getStored<Lesson[]>(STORAGE_KEYS.LESSONS, INITIAL_LESSONS);
+  static getLessons(gradeLevel?: number): Lesson[] {
+    const stored = getStored<Lesson[]>(STORAGE_KEYS.LESSONS, INITIAL_LESSONS);
+    // Tự động nâng cấp sang danh mục Bài học Kết nối tri thức và cuộc sống môn Tin học K6, K7, K8, K9
+    if (!stored.some((l) => l.topicId.startsWith('top-6-') || l.topicId.startsWith('top-7-'))) {
+      setStored(STORAGE_KEYS.LESSONS, INITIAL_LESSONS);
+      return gradeLevel ? INITIAL_LESSONS.filter((l) => l.gradeLevel === gradeLevel) : INITIAL_LESSONS;
+    }
+    if (gradeLevel) {
+      return stored.filter((l) => l.gradeLevel === gradeLevel);
+    }
+    return stored;
   }
 
   static getLessonsByGrade(gradeLevel: number): Lesson[] {
@@ -331,19 +500,20 @@ export class LMSStorageService {
 
   static getLessonsByGradeAndTopic(gradeLevel: number, topicIdOrName: string): Lesson[] {
     const all = this.getLessons();
+    const topics = this.getTopics();
     return all.filter((l) => {
       if (l.gradeLevel !== gradeLevel) return false;
       if (!topicIdOrName) return true;
       if (l.topicId === topicIdOrName) return true;
-      // If topicIdOrName is a topic name or contains code
-      if (topicIdOrName.includes('top-') && l.topicId === topicIdOrName) return true;
       const lower = topicIdOrName.toLowerCase();
-      if (l.topicId === 'top-a' && (lower.includes('chủ đề a') || lower.includes('máy tính và cộng đồng'))) return true;
-      if (l.topicId === 'top-b' && (lower.includes('chủ đề b') || lower.includes('mạng máy tính'))) return true;
-      if (l.topicId === 'top-c' && (lower.includes('chủ đề c') || lower.includes('tổ chức lưu trữ'))) return true;
-      if (l.topicId === 'top-d' && (lower.includes('chủ đề d') || lower.includes('đạo đức, pháp luật'))) return true;
-      if (l.topicId === 'top-e' && (lower.includes('chủ đề e') || lower.includes('ứng dụng tin học'))) return true;
-      if (l.topicId === 'top-f' && (lower.includes('chủ đề f') || lower.includes('giải quyết vấn đề'))) return true;
+      const topicObj = topics.find((t) => t.id === l.topicId);
+      if (topicObj && (topicObj.name.toLowerCase() === lower || topicObj.code.toLowerCase() === lower)) return true;
+      if (lower.includes('chủ đề 1') && l.topicId === `top-${gradeLevel}-1`) return true;
+      if (lower.includes('chủ đề 2') && l.topicId === `top-${gradeLevel}-2`) return true;
+      if (lower.includes('chủ đề 3') && l.topicId === `top-${gradeLevel}-3`) return true;
+      if (lower.includes('chủ đề 4') && l.topicId === `top-${gradeLevel}-4`) return true;
+      if (lower.includes('chủ đề 5') && l.topicId === `top-${gradeLevel}-5`) return true;
+      if (lower.includes('chủ đề 6') && l.topicId === `top-${gradeLevel}-6`) return true;
       return false;
     });
   }
@@ -415,11 +585,13 @@ export class LMSStorageService {
       let topic = q.topic || (q as any).topicName;
       if (!topic && (q as any).topicId) {
         const found = topics.find((t) => t.id === (q as any).topicId);
-        topic = found ? found.name : 'Chủ đề A: Máy tính và cộng đồng';
+        topic = found ? found.name : 'Chủ đề 1: Máy tính và cộng đồng';
       }
       if (!topic) {
-        topic = 'Chủ đề A: Máy tính và cộng đồng';
+        topic = 'Chủ đề 1: Máy tính và cộng đồng';
       }
+
+      topic = normalizeKNTTTopic(topic, gradeLevel);
 
       return {
         ...q,
@@ -535,7 +707,20 @@ export class LMSStorageService {
 
   // Tests
   static getTests(): Test[] {
-    return getStored<Test[]>(STORAGE_KEYS.TESTS, INITIAL_TESTS);
+    const list = getStored<Test[]>(STORAGE_KEYS.TESTS, INITIAL_TESTS);
+    return list.map((test) => {
+      if (test.matrix?.selectedTopics && test.matrix.selectedTopics.some((t) => t.includes('Chủ đề A') || t.includes('Chủ đề B') || t.includes('Chủ đề C') || t.includes('Chủ đề D') || t.includes('Chủ đề E') || t.includes('Chủ đề F'))) {
+        const normalized = test.matrix.selectedTopics.map((top) => normalizeKNTTTopic(top, test.gradeLevel));
+        return {
+          ...test,
+          matrix: {
+            ...test.matrix,
+            selectedTopics: Array.from(new Set(normalized))
+          }
+        };
+      }
+      return test;
+    });
   }
 
   static addTest(test: Test): void {

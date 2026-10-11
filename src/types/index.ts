@@ -72,6 +72,9 @@ export interface ClassRoom {
   academicYearId: string;
   homeroomTeacherId?: string;
   homeroomTeacherName?: string;
+  subjectTeacherId?: string;       // Giáo viên bộ môn Tin học
+  subjectTeacherName?: string;     // Tên giáo viên bộ môn Tin học
+  assignedTeacherIds?: string[];   // Danh sách ID giáo viên được phân công giảng dạy
   studentCount: number;
 }
 
@@ -84,8 +87,8 @@ export interface Subject {
 
 export interface Topic {
   id: string;
-  code: string; // "CHU_DE_A", "CHU_DE_B", v.v.
-  name: string; // "Chủ đề A: Máy tính và cộng đồng"
+  code: string; // "CHỦ ĐỀ 1", "CHỦ ĐỀ 2", v.v.
+  name: string; // "Chủ đề 1: Máy tính và cộng đồng"
   gradeLevel: number;
   description: string;
 }
@@ -101,10 +104,10 @@ export interface Lesson {
 
 export interface Question {
   id: string;
-  code: string; // e.g. "TH6-A-001"
+  code: string; // e.g. "TH6-01-001"
   content: string; // Nội dung câu hỏi
   gradeLevel: number; // 6, 7, 8, 9
-  topic: string; // Chủ đề A, B, C, D, E, F
+  topic: string; // Chủ đề 1, 2, 3, 4, 5, 6 theo bộ sách Kết nối tri thức và cuộc sống
   lessonTitle: string; // Tên bài học
   learningOutcome: string; // Yêu cầu cần đạt
   difficulty: QuestionDifficulty; // BIET | HIEU | VAN_DUNG

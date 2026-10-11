@@ -8,7 +8,7 @@ import {
   signOut
 } from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
-import { LMSStorageService } from './storage';
+import { LMSStorageService, normalizeKNTTTopic } from './storage';
 import { onStorageChange, notifyChange } from './storageEvents';
 import {
   APPS_SCRIPT_URL_KEY,
@@ -45,6 +45,7 @@ export {
 import {
   User,
   UserRole,
+  ClassRoom,
   Lesson,
   Question,
   QuestionDifficulty,
@@ -313,8 +314,8 @@ export const parseRowToQuestion = (row: any[], i: number): Question | null => {
   if (codeGradeMatch) {
     gradeLevel = parseInt(codeGradeMatch[1], 10);
   }
-  const rawTopic = String(row[4] || 'Chủ đề A: Máy tính và cộng đồng').trim();
-  const topic = rawTopic || 'Chủ đề A: Máy tính và cộng đồng';
+  const rawTopic = String(row[4] || 'Chủ đề 1: Máy tính và cộng đồng').trim();
+  const topic = normalizeKNTTTopic(rawTopic || 'Chủ đề 1: Máy tính và cộng đồng', gradeLevel);
 
   let lessonTitle = '';
   let learningOutcome = '';
@@ -793,15 +794,28 @@ export class GoogleSheetsService {
 
   private static buildLopHocRows(): any[][] {
     const classes = LMSStorageService.getClasses();
+    const users = LMSStorageService.getUsers();
+    const teachers = users.filter((u) => u.role === 'TEACHER' || u.role === 'DEPARTMENT_HEAD');
+
     return [
-      ['ID', 'Tên lớp', 'Khối', 'Sĩ số', 'Giáo viên chủ nhiệm'],
-      ...classes.map((c) => [
-        c.id,
-        c.name,
-        c.name.split('/')[0] || '6',
-        c.studentCount,
-        c.homeroomTeacherName || ''
-      ])
+      ['ID', 'Tên lớp', 'Khối', 'Sĩ số', 'Giáo viên chủ nhiệm', 'Giáo viên phân công môn Tin học'],
+      ...classes.map((c) => {
+        const assignedTeachers = teachers.filter((t) =>
+          t.assignedClassIds?.includes(c.id) ||
+          c.assignedTeacherIds?.includes(t.id) ||
+          c.subjectTeacherId === t.id
+        );
+        const assignedTeacherNames = assignedTeachers.map((t) => t.fullName).join(', ') || c.subjectTeacherName || c.homeroomTeacherName || '';
+
+        return [
+          c.id,
+          c.name,
+          c.name.split('/')[0] || '6',
+          c.studentCount,
+          c.homeroomTeacherName || '',
+          assignedTeacherNames
+        ];
+      })
     ];
   }
 
@@ -1432,6 +1446,7 @@ export class GoogleSheetsService {
       }
 
       const studentId = matchedUser?.id || `user-student-${studentCode}`;
+      const gradeNum = parseInt(String(className || '').replace(/[^0-9]/g, '').slice(0, 1), 10) || 6;
 
       importedSubs.push({
         id,
@@ -1442,13 +1457,17 @@ export class GoogleSheetsService {
         studentCode: matchedUser?.studentCode || studentCode,
         classId: matchedUser?.classId || '',
         className: className || '8/7',
+        gradeLevel: gradeNum,
         testTitle,
         variantCode,
         answers: {},
         score,
+        maxScore: 10,
         totalQuestions,
         correctCount,
+        startedAt: submittedAt,
         submittedAt,
+        timeSpentSeconds: 1800,
         status: 'COMPLETED'
       });
     }
@@ -1459,6 +1478,194 @@ export class GoogleSheetsService {
     }
 
     return importedSubs.length;
+  }
+
+  /**
+   * Tải danh sách Khối & Lớp học và phân công từ sheet LopHoc trên Google Sheet về LMS
+   */
+  static async pullClassesFromSheet(
+    spreadsheetId: string,
+    accessToken: string
+  ): Promise<number> {
+    const rows = await this.readSheetValues(spreadsheetId, 'LopHoc!A2:F', accessToken);
+    if (!rows || rows.length === 0) return 0;
+
+    const users = LMSStorageService.getUsers();
+    const teachers = users.filter((u) => u.role === 'TEACHER' || u.role === 'DEPARTMENT_HEAD');
+    const importedClasses: ClassRoom[] = [];
+    const teacherAssignments: Record<string, string[]> = {};
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      if (!row || !row[1]) continue;
+      const id = String(row[0] || `cls-${Date.now()}-${i}`);
+      let name = String(row[1] || '6/1').trim();
+      if (name.includes('T') && name.includes('-')) {
+        const d = new Date(name);
+        if (!isNaN(d.getTime())) {
+          name = `${d.getMonth() + 1}/${d.getDate()}`;
+        }
+      }
+      const rawGrade = String(row[2] || name.split('/')[0] || '6');
+      const gradeNum = parseInt(rawGrade.replace(/[^0-9]/g, ''), 10) || parseInt(name.split('/')[0], 10) || 6;
+      const studentCount = parseInt(String(row[3] || '35'), 10) || 35;
+      const homeroomTeacherName = String(row[4] || '').trim();
+      const subjectTeacherName = String(row[5] || '').trim();
+
+      const matchedHomeroom = teachers.find(
+        (t) => t.fullName.toLowerCase() === homeroomTeacherName.toLowerCase() || t.username.toLowerCase() === homeroomTeacherName.toLowerCase()
+      );
+
+      const assignedTeacherIds: string[] = [];
+      const teacherNames = subjectTeacherName.split(/[,;]/).map((s) => s.trim().toLowerCase()).filter(Boolean);
+      teachers.forEach((t) => {
+        if (teacherNames.some((n) => t.fullName.toLowerCase() === n || t.username.toLowerCase() === n)) {
+          if (!assignedTeacherIds.includes(t.id)) {
+            assignedTeacherIds.push(t.id);
+            if (!teacherAssignments[t.id]) teacherAssignments[t.id] = [];
+            teacherAssignments[t.id].push(id);
+          }
+        }
+      });
+
+      const matchedSubjectTeacher = assignedTeacherIds.length > 0
+        ? teachers.find((t) => t.id === assignedTeacherIds[0])
+        : undefined;
+
+      if (matchedHomeroom && !assignedTeacherIds.includes(matchedHomeroom.id)) {
+        assignedTeacherIds.push(matchedHomeroom.id);
+        if (!teacherAssignments[matchedHomeroom.id]) teacherAssignments[matchedHomeroom.id] = [];
+        teacherAssignments[matchedHomeroom.id].push(id);
+      }
+
+      importedClasses.push({
+        id,
+        name,
+        gradeId: `grade-${gradeNum}`,
+        academicYearId: 'ay-2025-2026',
+        homeroomTeacherId: matchedHomeroom?.id,
+        homeroomTeacherName: homeroomTeacherName || matchedHomeroom?.fullName,
+        subjectTeacherId: matchedSubjectTeacher?.id,
+        subjectTeacherName: subjectTeacherName || matchedSubjectTeacher?.fullName,
+        assignedTeacherIds,
+        studentCount
+      });
+    }
+
+    if (importedClasses.length > 0) {
+      LMSStorageService.importClasses(importedClasses);
+      Object.entries(teacherAssignments).forEach(([tId, cIds]) => {
+        const tUser = users.find((u) => u.id === tId);
+        if (tUser) {
+          const mergedClasses = Array.from(new Set([...(tUser.assignedClassIds || []), ...cIds]));
+          LMSStorageService.updateUser({ ...tUser, assignedClassIds: mergedClasses });
+        }
+      });
+      notifyChange('classes');
+      notifyChange('users');
+    }
+
+    return importedClasses.length;
+  }
+
+  /**
+   * Tải danh sách Khối & Lớp học và phân công từ Google Sheet (sheet LopHoc) qua Apps Script
+   */
+  static async pullClassesFromAppsScript(): Promise<{ success: boolean; count: number; error?: string }> {
+    const scriptUrl = getAppsScriptUrl();
+    if (!scriptUrl) return { success: false, count: 0, error: 'Chưa có Apps Script URL' };
+    const sheetId = getSavedSheetId();
+    try {
+      const url = `${scriptUrl}?action=getClasses${sheetId ? `&sheetId=${encodeURIComponent(sheetId)}` : ''}`;
+      const res = await fetch(url);
+      if (!res.ok) {
+        return { success: false, count: 0, error: `Lỗi kết nối Apps Script: HTTP ${res.status}` };
+      }
+      const data = await res.json();
+      if (!Array.isArray(data) || data.length <= 1) {
+        return { success: true, count: 0 };
+      }
+
+      const rows = data.slice(1);
+      const users = LMSStorageService.getUsers();
+      const teachers = users.filter((u) => u.role === 'TEACHER' || u.role === 'DEPARTMENT_HEAD');
+      const importedClasses: ClassRoom[] = [];
+      const teacherAssignments: Record<string, string[]> = {};
+
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        if (!row || !row[1]) continue;
+        const id = String(row[0] || `cls-${Date.now()}-${i}`);
+        let name = String(row[1] || '6/1').trim();
+        if (name.includes('T') && name.includes('-')) {
+          const d = new Date(name);
+          if (!isNaN(d.getTime())) {
+            name = `${d.getMonth() + 1}/${d.getDate()}`;
+          }
+        }
+        const rawGrade = String(row[2] || name.split('/')[0] || '6');
+        const gradeNum = parseInt(rawGrade.replace(/[^0-9]/g, ''), 10) || parseInt(name.split('/')[0], 10) || 6;
+        const studentCount = parseInt(String(row[3] || '35'), 10) || 35;
+        const homeroom = String(row[4] || '').trim();
+        const subjectTeacher = String(row[5] || '').trim();
+
+        const matchedHomeroom = teachers.find(
+          (t) => t.fullName.toLowerCase() === homeroom.toLowerCase() || t.username.toLowerCase() === homeroom.toLowerCase()
+        );
+
+        const assignedTeacherIds: string[] = [];
+        const teacherNames = subjectTeacher.split(/[,;]/).map((s) => s.trim().toLowerCase()).filter(Boolean);
+        teachers.forEach((t) => {
+          if (teacherNames.some((n) => t.fullName.toLowerCase() === n || t.username.toLowerCase() === n)) {
+            if (!assignedTeacherIds.includes(t.id)) {
+              assignedTeacherIds.push(t.id);
+              if (!teacherAssignments[t.id]) teacherAssignments[t.id] = [];
+              teacherAssignments[t.id].push(id);
+            }
+          }
+        });
+
+        const matchedSubjectTeacher = assignedTeacherIds.length > 0
+          ? teachers.find((t) => t.id === assignedTeacherIds[0])
+          : undefined;
+
+        if (matchedHomeroom && !assignedTeacherIds.includes(matchedHomeroom.id)) {
+          assignedTeacherIds.push(matchedHomeroom.id);
+          if (!teacherAssignments[matchedHomeroom.id]) teacherAssignments[matchedHomeroom.id] = [];
+          teacherAssignments[matchedHomeroom.id].push(id);
+        }
+
+        importedClasses.push({
+          id,
+          name,
+          gradeId: `grade-${gradeNum}`,
+          academicYearId: 'ay-2025-2026',
+          homeroomTeacherId: matchedHomeroom?.id,
+          homeroomTeacherName: homeroom || matchedHomeroom?.fullName,
+          subjectTeacherId: matchedSubjectTeacher?.id,
+          subjectTeacherName: subjectTeacher || matchedSubjectTeacher?.fullName,
+          assignedTeacherIds,
+          studentCount
+        });
+      }
+
+      if (importedClasses.length > 0) {
+        LMSStorageService.importClasses(importedClasses);
+        Object.entries(teacherAssignments).forEach(([tId, cIds]) => {
+          const tUser = users.find((u) => u.id === tId);
+          if (tUser) {
+            const mergedClasses = Array.from(new Set([...(tUser.assignedClassIds || []), ...cIds]));
+            LMSStorageService.updateUser({ ...tUser, assignedClassIds: mergedClasses });
+          }
+        });
+        notifyChange('classes');
+        notifyChange('users');
+        return { success: true, count: importedClasses.length };
+      }
+      return { success: true, count: 0 };
+    } catch (e: any) {
+      return { success: false, count: 0, error: e.message || 'Lỗi đọc lớp học từ Apps Script' };
+    }
   }
 
   /**
@@ -1483,7 +1690,7 @@ export class GoogleSheetsService {
       if (!title || !title.trim()) continue;
 
       const id = row[0] || `les-${gradeLevel}-${Date.now()}-${i}`;
-      const topicId = row[2] || 'top-a';
+      const topicId = row[2] || `top-${gradeLevel}-1`;
       const lessonNumber = parseInt(row[4], 10) || (i + 1);
       const learningOutcomes = row[6] || '';
 
@@ -1585,7 +1792,7 @@ export class GoogleSheetsService {
           importedLessons.push({
             id: row[0] || `les-${gradeLevel}-${Date.now()}-${i}`,
             gradeLevel,
-            topicId: row[2] || 'top-a',
+            topicId: row[2] || `top-${gradeLevel}-1`,
             lessonNumber: parseInt(row[4], 10) || (i + 1),
             title: String(title).trim(),
             learningOutcomes: row[6] || ''

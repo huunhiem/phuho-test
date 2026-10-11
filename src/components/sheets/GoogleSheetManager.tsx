@@ -484,6 +484,14 @@ function doGet(e) {
     var data = sheet.getDataRange().getValues();
     return jsonResponse(data);
   }
+
+  // 8. Lấy danh sách lớp học và phân công
+  if (action === 'getClasses' || action === 'getLopHoc') {
+    var sheet = ss.getSheetByName('LopHoc');
+    if (!sheet) return jsonResponse({ error: 'Chưa có sheet LopHoc' });
+    var data = sheet.getDataRange().getValues();
+    return jsonResponse(data);
+  }
   
   return jsonResponse({ error: 'Action không hợp lệ: ' + action });
 }
@@ -633,7 +641,7 @@ function doPost(e) {
         payload.code || '',
         payload.content || '',
         payload.gradeLevel || payload.grade || 6,
-        payload.topic || payload.topicId || 'Chủ đề A: Máy tính và cộng đồng',
+        payload.topic || payload.topicId || 'Chủ đề 1: Máy tính và cộng đồng',
         payload.lessonTitle || 'Bài 1: Thông tin và dữ liệu',
         payload.learningOutcome || 'Chuẩn kiến thức GDPT 2018',
         payload.difficulty || 'BIET',
@@ -829,6 +837,54 @@ function doPost(e) {
         for (var i = gdData.length - 1; i >= 1; i--) {
           if (gdData[i][0] == payload.id) {
             gdSheet.deleteRow(i + 1);
+            return jsonResponse({ success: true, action: 'deleted' });
+          }
+        }
+      }
+      return jsonResponse({ success: true, action: 'not_found' });
+    }
+
+    // Thêm hoặc cập nhật Lớp học (LopHoc)
+    if (action === 'saveClass' || action === 'addClass') {
+      if (!ss) return jsonResponse({ error: 'Không tìm thấy Google Sheet' });
+      var lhSheet = ss.getSheetByName('LopHoc');
+      if (!lhSheet) {
+        lhSheet = ss.insertSheet('LopHoc');
+        lhSheet.appendRow(['ID', 'Tên lớp', 'Khối', 'Sĩ số', 'Giáo viên chủ nhiệm', 'Giáo viên phân công môn Tin học']);
+      }
+      var lhData = lhSheet.getDataRange().getValues();
+      var targetRow = -1;
+      for (var i = 1; i < lhData.length; i++) {
+        if (lhData[i][0] == payload.id || lhData[i][1] == payload.name) {
+          targetRow = i + 1;
+          break;
+        }
+      }
+      var lhRow = [
+        payload.id,
+        payload.name || '',
+        payload.grade || (payload.name ? payload.name.split('/')[0] : '6'),
+        payload.studentCount || 35,
+        payload.homeroomTeacherName || '',
+        payload.assignedTeacherNames || payload.subjectTeacherName || ''
+      ];
+      if (targetRow > 0) {
+        lhSheet.getRange(targetRow, 1, 1, lhRow.length).setValues([lhRow]);
+      } else {
+        lhSheet.appendRow(lhRow);
+      }
+      return jsonResponse({ success: true, action: targetRow > 0 ? 'updated' : 'inserted' });
+    }
+
+    // Xóa Lớp học (LopHoc)
+    if (action === 'deleteClass') {
+      if (!ss) return jsonResponse({ error: 'Không tìm thấy Google Sheet' });
+      var lhSheet = ss.getSheetByName('LopHoc');
+      if (lhSheet) {
+        var lhData = lhSheet.getDataRange().getValues();
+        for (var i = lhData.length - 1; i >= 1; i--) {
+          if (lhData[i][0] == payload.id || (payload.name && lhData[i][1] == payload.name)) {
+            lhSheet.deleteRow(i + 1);
             return jsonResponse({ success: true, action: 'deleted' });
           }
         }

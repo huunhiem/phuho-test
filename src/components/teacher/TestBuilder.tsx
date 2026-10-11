@@ -317,7 +317,7 @@ export const MATRIX_PRESETS = [
 ];
 
 export const TestBuilder: React.FC<TestBuilderProps> = ({ currentUser, onTestCreated }) => {
-  const isPrivileged = currentUser.role === 'ADMIN' || currentUser.role === 'SUPER_ADMIN' || currentUser.role === 'PRINCIPAL';
+  const isPrivileged = currentUser.role === 'ADMIN' || currentUser.role === 'PRINCIPAL';
   const [tests, setTests] = useState<Test[]>(() => LMSStorageService.getTests());
   const [questions, setQuestions] = useState<Question[]>(() => LMSStorageService.getQuestions());
   const [lessons, setLessons] = useState(() => LMSStorageService.getLessons());
@@ -361,7 +361,7 @@ export const TestBuilder: React.FC<TestBuilderProps> = ({ currentUser, onTestCre
     title: 'Kiểm tra Cuối kì 1 - Tin học 6 (2025-2026)',
     gradeLevel: 6,
     durationMinutes: 45,
-    selectedTopics: ['Chủ đề A: Máy tính và cộng đồng', 'Chủ đề B: Mạng máy tính và Internet'],
+    selectedTopics: ['Chủ đề 1: Máy tính và cộng đồng', 'Chủ đề 2: Mạng máy tính và Internet'],
     variantCount: 2 // Số mã đề cần sinh (ví dụ: 101, 102)
   });
 
@@ -892,7 +892,7 @@ export const TestBuilder: React.FC<TestBuilderProps> = ({ currentUser, onTestCre
       title: test.title,
       gradeLevel: test.gradeLevel,
       durationMinutes: test.durationMinutes,
-      selectedTopics: test.matrix?.selectedTopics || ['Chủ đề A: Máy tính và cộng đồng'],
+      selectedTopics: test.matrix?.selectedTopics || ['Chủ đề 1: Máy tính và cộng đồng'],
       variantCount: test.variants?.length || 2
     });
     setSelectedQuestionIds(test.questionIds || []);

@@ -6,6 +6,7 @@ export type StorageEntity =
   | 'assignments'
   | 'submissions'
   | 'lessons'
+  | 'topics'
   | 'all';
 
 export type StorageChangeListener = (entity: StorageEntity) => void;

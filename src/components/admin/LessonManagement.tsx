@@ -28,7 +28,7 @@ export const LessonManagement: React.FC = () => {
   const [selectedTopicFilter, setSelectedTopicFilter] = useState<string>('ALL');
 
   const [lessons, setLessons] = useState<Lesson[]>(() => LMSStorageService.getLessons());
-  const [topics] = useState<Topic[]>(() => LMSStorageService.getTopics());
+  const [topics, setTopics] = useState<Topic[]>(() => LMSStorageService.getTopics());
   const [questions, setQuestions] = useState(() => LMSStorageService.getQuestions());
 
   // Google Sheet sync state
@@ -52,13 +52,14 @@ export const LessonManagement: React.FC = () => {
   }>({
     gradeLevel: 6,
     lessonNumber: 1,
-    topicId: 'top-a',
+    topicId: 'top-6-1',
     title: '',
     learningOutcomes: ''
   });
 
   const refreshData = () => {
     setLessons(LMSStorageService.getLessons());
+    setTopics(LMSStorageService.getTopics());
     setQuestions(LMSStorageService.getQuestions());
   };
 
@@ -111,10 +112,12 @@ export const LessonManagement: React.FC = () => {
   const handleOpenAdd = () => {
     setEditingLesson(null);
     const nextLessonNum = lessonsInGrade.length > 0 ? Math.max(...lessonsInGrade.map((l) => l.lessonNumber)) + 1 : 1;
+    const gradeTopics = topics.filter((t) => t.gradeLevel === selectedGrade);
+    const defaultTopicId = gradeTopics[0]?.id || `top-${selectedGrade}-1`;
     setFormData({
       gradeLevel: selectedGrade,
       lessonNumber: nextLessonNum,
-      topicId: topics[0]?.id || 'top-a',
+      topicId: defaultTopicId,
       title: `Bài ${nextLessonNum}: `,
       learningOutcomes: ''
     });
@@ -184,11 +187,14 @@ export const LessonManagement: React.FC = () => {
   };
 
   const confirmResetLessons = () => {
+    localStorage.removeItem('phuho_lms_topics');
+    localStorage.removeItem('phuho_lms_lessons');
+    LMSStorageService.resetTopics();
     LMSStorageService.resetLessons();
     GoogleSheetsService.triggerAutoSync('lessons');
     refreshData();
     setIsResetConfirmOpen(false);
-    showToast('Đã khôi phục danh mục bài học chuẩn môn Tin học THCS và đồng bộ!');
+    showToast('Đã khôi phục toàn bộ Chủ đề & Bài học chuẩn Bộ sách Kết nối tri thức và cuộc sống (K6-K9)!');
   };
 
   const handleSyncToGoogleSheet = async () => {
@@ -364,12 +370,14 @@ export const LessonManagement: React.FC = () => {
             onChange={(e) => setSelectedTopicFilter(e.target.value)}
             className="w-full sm:w-auto px-3 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
           >
-            <option value="ALL">Tất cả Chủ đề ({topics.length} chủ đề)</option>
-            {topics.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name}
-              </option>
-            ))}
+            <option value="ALL">Tất cả Chủ đề (Khối {selectedGrade})</option>
+            {topics
+              .filter((t) => t.gradeLevel === selectedGrade)
+              .map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
           </select>
         </div>
       </div>
@@ -513,11 +521,13 @@ export const LessonManagement: React.FC = () => {
                   onChange={(e) => setFormData({ ...formData, topicId: e.target.value })}
                   className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
                 >
-                  {topics.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.name}
-                    </option>
-                  ))}
+                  {topics
+                    .filter((t) => t.gradeLevel === formData.gradeLevel)
+                    .map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name}
+                      </option>
+                    ))}
                 </select>
               </div>
 
