@@ -8,15 +8,20 @@ interface TeacherClassesProps {
 }
 
 export const TeacherClasses: React.FC<TeacherClassesProps> = ({ currentUser }) => {
-  const classes = LMSStorageService.getClasses();
+  const allClasses = LMSStorageService.getClasses();
+  const isPrivileged = currentUser.role === 'ADMIN' || currentUser.role === 'PRINCIPAL';
+  const classes = isPrivileged
+    ? allClasses
+    : allClasses.filter((c) => currentUser.assignedClassIds?.includes(c.id));
+
   const users = LMSStorageService.getUsers();
   const submissions = LMSStorageService.getSubmissions();
 
-  const [selectedClassId, setSelectedClassId] = useState<string>(classes[0]?.id || '');
+  const [selectedClassId, setSelectedClassId] = useState<string>(() => classes[0]?.id || '');
   const [searchTerm, setSearchTerm] = useState('');
 
   const selectedClass = classes.find((c) => c.id === selectedClassId) || classes[0];
-  const studentsInClass = users.filter((u) => u.role === 'STUDENT' && u.classId === selectedClass?.id);
+  const studentsInClass = users.filter((u) => u.role === 'STUDENT' && u.classId === selectedClass?.id && u.status !== 'DELETED');
 
   const filteredStudents = studentsInClass.filter(
     (s) =>
@@ -34,31 +39,36 @@ export const TeacherClasses: React.FC<TeacherClassesProps> = ({ currentUser }) =
       </div>
 
       {/* Class Pills */}
-      <div className="flex items-center gap-2 overflow-x-auto pb-2 border-b border-slate-200">
-        {classes.map((cls) => {
-          const isActive = cls.id === selectedClassId;
-          const isAssigned = currentUser.assignedClassIds?.includes(cls.id);
-          return (
-            <button
-              key={cls.id}
-              type="button"
-              onClick={() => setSelectedClassId(cls.id)}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-colors shrink-0 ${
-                isActive
-                  ? 'bg-indigo-600 text-white shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900 bg-white border border-slate-200'
-              }`}
-            >
-              <span>Lớp {cls.name}</span>
-              {isAssigned && (
+      {classes.length === 0 ? (
+        <div className="p-10 text-center bg-white rounded-xl border border-slate-200 text-slate-500 text-xs space-y-2">
+          <GraduationCap className="w-8 h-8 mx-auto text-slate-400" />
+          <div className="font-semibold text-slate-700 text-sm">Chưa được phân công lớp phụ trách</div>
+          <p>Tài khoản giáo viên hiện chưa có lớp nào được chỉ định. Vui lòng liên hệ Quản trị viên hệ thống để được phân công lớp giảng dạy.</p>
+        </div>
+      ) : (
+        <div className="flex items-center gap-2 overflow-x-auto pb-2 border-b border-slate-200">
+          {classes.map((cls) => {
+            const isActive = cls.id === selectedClassId;
+            return (
+              <button
+                key={cls.id}
+                type="button"
+                onClick={() => setSelectedClassId(cls.id)}
+                className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-colors shrink-0 ${
+                  isActive
+                    ? 'bg-indigo-600 text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900 bg-white border border-slate-200'
+                }`}
+              >
+                <span>Lớp {cls.name}</span>
                 <span className="text-[10px] bg-emerald-500 text-white px-1.5 py-0.2 rounded-full font-bold">
-                  Phụ trách
+                  Phân công
                 </span>
-              )}
-            </button>
-          );
-        })}
-      </div>
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Class Roster Summary Card */}
       {selectedClass && (

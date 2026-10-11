@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { Submission, Question, User, Assignment, Test, ClassRoom } from '../../types';
 import { LMSStorageService } from '../../services/storage';
+import { GoogleDriveService } from '../../services/googleDriveService';
 import { onStorageChange } from '../../services/storageEvents';
 
 interface ResultsAndGradingProps {
@@ -61,6 +62,15 @@ export const ResultsAndGrading: React.FC<ResultsAndGradingProps> = ({ currentUse
     });
     return () => unsub();
   }, []);
+
+  const isPrivileged = currentUser.role === 'ADMIN' || currentUser.role === 'PRINCIPAL';
+  const visibleAssignments = isPrivileged
+    ? assignments
+    : assignments.filter((a) => a.assignedBy === currentUser.id);
+
+  const visibleClasses = isPrivileged
+    ? classes
+    : classes.filter((c) => currentUser.assignedClassIds?.includes(c.id));
 
   // Compute detailed participation report using LMSStorageService
   const report = useMemo(() => {
@@ -207,8 +217,8 @@ export const ResultsAndGrading: React.FC<ResultsAndGradingProps> = ({ currentUse
               }}
               className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-slate-50/50 hover:bg-white text-slate-900 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors"
             >
-              <option value="ALL">📋 Tất cả các bài kiểm tra & đợt thi trong hệ thống</option>
-              {assignments.map((a) => (
+              <option value="ALL">📋 {isPrivileged ? 'Tất cả các bài kiểm tra & đợt thi' : 'Tất cả đợt kiểm tra do tôi giao'}</option>
+              {visibleAssignments.map((a) => (
                 <option key={a.id} value={a.id}>
                   {a.testTitle} — Khối {a.gradeLevel} (Lớp: {a.classNames.join(', ')})
                 </option>
@@ -226,8 +236,8 @@ export const ResultsAndGrading: React.FC<ResultsAndGradingProps> = ({ currentUse
               onChange={(e) => setSelectedClassFilter(e.target.value)}
               className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-slate-50/50 hover:bg-white text-slate-900 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors"
             >
-              <option value="ALL">🏫 Tất cả các lớp được giao</option>
-              {classes.map((c) => (
+              <option value="ALL">🏫 {isPrivileged ? 'Tất cả các lớp' : 'Tất cả lớp phụ trách'}</option>
+              {visibleClasses.map((c) => (
                 <option key={c.id} value={c.id}>
                   Lớp {c.name} ({c.studentCount} HS)
                 </option>
@@ -634,6 +644,21 @@ export const ResultsAndGrading: React.FC<ResultsAndGradingProps> = ({ currentUse
                         {q.type === 'ESSAY' ? 'Tự luận' : 'Trắc nghiệm tự động'}
                       </span>
                     </div>
+
+                    {(q.imageUrl || q.imageDriveUrl) && (
+                      <div className="my-2 p-2 bg-white rounded-lg border border-slate-200 inline-block">
+                        <img
+                          src={GoogleDriveService.getDriveDirectImageUrl(q.imageUrl || q.imageDriveUrl || '')}
+                          alt="Ảnh câu hỏi"
+                          className="max-h-48 max-w-full rounded object-contain"
+                          onError={(e) => {
+                            if (q.imageDriveUrl && e.currentTarget.src !== q.imageDriveUrl) {
+                              e.currentTarget.src = q.imageDriveUrl;
+                            }
+                          }}
+                        />
+                      </div>
+                    )}
 
                     {/* Student response display */}
                     <div className="bg-white p-3 rounded-lg border border-slate-200 text-slate-800">

@@ -36,7 +36,7 @@ export interface User {
   assignedClassIds?: string[]; // Dành cho giáo viên
   teacherCode?: string; // Mã giáo viên
   studentCode?: string; // Mã số học sinh
-  status?: 'ACTIVE' | 'LOCKED';
+  status?: 'ACTIVE' | 'LOCKED' | 'DELETED';
   createdAt: string;
 }
 

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Layers, Plus, Users, UserCheck, Edit2, Trash2 } from 'lucide-react';
 import { ClassRoom } from '../../types';
 import { LMSStorageService } from '../../services/storage';
+import { GoogleSheetsService } from '../../services/googleSheetsService';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 
 export const ClassManagement: React.FC = () => {
@@ -55,6 +56,7 @@ export const ClassManagement: React.FC = () => {
   const confirmDeleteClass = () => {
     if (deleteClassId) {
       LMSStorageService.deleteClass(deleteClassId);
+      GoogleSheetsService.triggerAutoSync('classes');
       refreshClasses();
       setDeleteClassId(null);
     }
@@ -74,6 +76,7 @@ export const ClassManagement: React.FC = () => {
         studentCount: Number(formData.studentCount)
       };
       LMSStorageService.updateClass(updated);
+      GoogleSheetsService.triggerAutoSync('classes');
     } else {
       const newClass: ClassRoom = {
         id: `cls-${Date.now()}`,
@@ -85,6 +88,7 @@ export const ClassManagement: React.FC = () => {
         studentCount: Number(formData.studentCount)
       };
       LMSStorageService.addClass(newClass);
+      GoogleSheetsService.triggerAutoSync('classes');
     }
 
     setIsModalOpen(false);

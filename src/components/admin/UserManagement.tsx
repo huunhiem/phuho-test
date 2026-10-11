@@ -24,6 +24,7 @@ import { User, UserRole } from '../../types';
 import { LMSStorageService } from '../../services/storage';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 import {
+  GoogleSheetsService,
   subscribeAutoSyncStatus,
   AutoSyncState,
   getSavedSheetId
@@ -145,7 +146,19 @@ export const UserManagement: React.FC = () => {
 
   const confirmDeleteUser = () => {
     if (deleteUserId) {
+      const target = users.find((u) => u.id === deleteUserId);
       LMSStorageService.deleteUser(deleteUserId);
+      GoogleSheetsService.triggerAutoSync('users');
+      GoogleSheetsService.triggerAutoSync('submissions');
+      if (target) {
+        GoogleSheetsService.postToAppsScript({
+          action: 'deleteUser',
+          id: target.id,
+          studentCode: target.studentCode,
+          username: target.username,
+          fullName: target.fullName
+        }).catch(() => {});
+      }
       refreshUsers();
       setDeleteUserId(null);
     }
@@ -156,12 +169,16 @@ export const UserManagement: React.FC = () => {
     if (!formData.fullName.trim()) return;
 
     if (editingUser) {
+      const selectedClass = classes.find((c) => c.id === formData.classId);
       const updated: User = {
         ...editingUser,
-        ...formData
+        ...formData,
+        gradeId: formData.role === 'STUDENT' ? (selectedClass?.gradeId || formData.gradeId || 'grade-6') : undefined
       };
       LMSStorageService.updateUser(updated);
+      GoogleSheetsService.triggerAutoSync('users');
     } else {
+      const selectedClass = classes.find((c) => c.id === formData.classId);
       const newUser: User = {
         id: `user-${Date.now()}`,
         username: formData.username || formData.email.split('@')[0] || `user_${Date.now()}`,
@@ -172,12 +189,13 @@ export const UserManagement: React.FC = () => {
         phone: formData.phone,
         schoolId: 'school-phuho-01',
         classId: formData.role === 'STUDENT' ? formData.classId : undefined,
-        gradeId: formData.role === 'STUDENT' ? formData.gradeId : undefined,
+        gradeId: formData.role === 'STUDENT' ? (selectedClass?.gradeId || formData.gradeId || 'grade-6') : undefined,
         studentCode: formData.role === 'STUDENT' ? formData.studentCode : undefined,
         teacherCode: formData.role === 'TEACHER' || formData.role === 'DEPARTMENT_HEAD' ? formData.teacherCode : undefined,
         createdAt: new Date().toISOString().split('T')[0]
       };
       LMSStorageService.addUser(newUser);
+      GoogleSheetsService.triggerAutoSync('users');
     }
 
     setIsModalOpen(false);
@@ -221,7 +239,15 @@ export const UserManagement: React.FC = () => {
     if (importPreview.length === 0) return;
 
     const newUsers: User[] = importPreview.map((item, idx) => {
-      const matchedClass = classes.find((c) => c.name === item.className) || classes[0];
+      let matchedClass = classes.find((c) => c.name === item.className || c.id === item.className);
+      if (!matchedClass && (item.className === '8/7' || item.className === '8.7' || item.className === '8-7')) {
+        matchedClass = classes.find((c) => c.id === 'cls-8-7');
+      }
+      if (!matchedClass && (item.className === '8/8' || item.className === '8.8' || item.className === '8-8')) {
+        matchedClass = classes.find((c) => c.id === 'cls-8-8');
+      }
+      if (!matchedClass) matchedClass = classes[0];
+
       return {
         id: `user-import-${Date.now()}-${idx}`,
         username: item.username,
@@ -232,12 +258,13 @@ export const UserManagement: React.FC = () => {
         schoolId: 'school-phuho-01',
         studentCode: item.studentCode,
         classId: matchedClass?.id,
-        gradeId: matchedClass?.gradeId || 'grade-6',
+        gradeId: matchedClass?.gradeId || (item.className.startsWith('8') ? 'grade-8' : 'grade-6'),
         createdAt: new Date().toISOString().split('T')[0]
       };
     });
 
     LMSStorageService.importStudents(newUsers);
+    GoogleSheetsService.triggerAutoSync('users');
     refreshUsers();
     setImportSuccessMessage(`Đã thêm thành công ${newUsers.length} học sinh và tự động đồng bộ lên Google Sheet!`);
     setTimeout(() => {

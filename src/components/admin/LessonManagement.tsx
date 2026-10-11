@@ -10,10 +10,16 @@ import {
   Layers,
   HelpCircle,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  FileSpreadsheet,
+  UploadCloud,
+  DownloadCloud,
+  Loader2
 } from 'lucide-react';
 import { Lesson, Topic } from '../../types';
 import { LMSStorageService, onStorageChange } from '../../services/storage';
+import { GoogleSheetsService, getGoogleAccessToken } from '../../services/googleSheetsService';
+import { getSavedSheetId } from '../../services/systemConfig';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 
 export const LessonManagement: React.FC = () => {
@@ -24,6 +30,10 @@ export const LessonManagement: React.FC = () => {
   const [lessons, setLessons] = useState<Lesson[]>(() => LMSStorageService.getLessons());
   const [topics] = useState<Topic[]>(() => LMSStorageService.getTopics());
   const [questions, setQuestions] = useState(() => LMSStorageService.getQuestions());
+
+  // Google Sheet sync state
+  const [isSyncingSheet, setIsSyncingSheet] = useState(false);
+  const [sheetSyncMessage, setSheetSyncMessage] = useState<string | null>(null);
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -140,7 +150,8 @@ export const LessonManagement: React.FC = () => {
         learningOutcomes: formData.learningOutcomes.trim()
       };
       LMSStorageService.updateLesson(updated);
-      showToast(`Đã cập nhật bài học: ${updated.title}`);
+      GoogleSheetsService.triggerAutoSync('lessons');
+      showToast(`Đã cập nhật bài học: ${updated.title} (Đồng bộ sheet TenBaiHoc)`);
     } else {
       const newLesson: Lesson = {
         id: `les-${formData.gradeLevel}-${Date.now()}`,
@@ -151,7 +162,8 @@ export const LessonManagement: React.FC = () => {
         learningOutcomes: formData.learningOutcomes.trim()
       };
       LMSStorageService.addLesson(newLesson);
-      showToast(`Đã thêm bài học mới: ${newLesson.title}`);
+      GoogleSheetsService.triggerAutoSync('lessons');
+      showToast(`Đã thêm bài học mới: ${newLesson.title} (Đồng bộ sheet TenBaiHoc)`);
     }
 
     refreshData();
@@ -162,19 +174,64 @@ export const LessonManagement: React.FC = () => {
     if (deleteLessonId) {
       const found = lessons.find((l) => l.id === deleteLessonId);
       LMSStorageService.deleteLesson(deleteLessonId);
+      GoogleSheetsService.triggerAutoSync('lessons');
       refreshData();
       setDeleteLessonId(null);
       if (found) {
-        showToast(`Đã xóa bài học: ${found.title}`);
+        showToast(`Đã xóa bài học: ${found.title} (Đồng bộ sheet TenBaiHoc)`);
       }
     }
   };
 
   const confirmResetLessons = () => {
     LMSStorageService.resetLessons();
+    GoogleSheetsService.triggerAutoSync('lessons');
     refreshData();
     setIsResetConfirmOpen(false);
-    showToast('Đã khôi phục danh mục bài học chuẩn môn Tin học THCS!');
+    showToast('Đã khôi phục danh mục bài học chuẩn môn Tin học THCS và đồng bộ!');
+  };
+
+  const handleSyncToGoogleSheet = async () => {
+    setIsSyncingSheet(true);
+    setSheetSyncMessage('Đang đồng bộ danh mục bài học lên Google Sheet (sheet TenBaiHoc)...');
+    try {
+      const sheetId = getSavedSheetId();
+      const token = getGoogleAccessToken();
+      if (sheetId && token) {
+        await GoogleSheetsService.syncEntity('lessons', sheetId, token);
+      } else {
+        await GoogleSheetsService.pushAllDataViaAppsScript();
+      }
+      setSheetSyncMessage('✓ Đã lưu thành công toàn bộ Tên bài học vào Google Sheet (sheet TenBaiHoc)!');
+      showToast('Đã lưu Tên bài học vào Google Sheet (sheet TenBaiHoc)!');
+    } catch (err: any) {
+      setSheetSyncMessage(`Lỗi đồng bộ: ${err.message || String(err)}`);
+    } finally {
+      setIsSyncingSheet(false);
+      setTimeout(() => setSheetSyncMessage(null), 4000);
+    }
+  };
+
+  const handlePullFromGoogleSheet = async () => {
+    setIsSyncingSheet(true);
+    setSheetSyncMessage('Đang tải danh mục bài học từ Google Sheet (sheet TenBaiHoc)...');
+    try {
+      const sheetId = getSavedSheetId();
+      const token = getGoogleAccessToken();
+      if (sheetId && token) {
+        const count = await GoogleSheetsService.pullLessonsFromSheet(sheetId, token);
+        refreshData();
+        setSheetSyncMessage(`✓ Đã nạp thành công ${count} bài học từ sheet TenBaiHoc!`);
+        showToast(`Đã cập nhật ${count} bài học từ Google Sheet!`);
+      } else {
+        setSheetSyncMessage('Chưa kết nối Google Sheet OAuth để đọc trực tiếp. Vui lòng kết nối Google Sheet.');
+      }
+    } catch (err: any) {
+      setSheetSyncMessage(`Lỗi đọc sheet TenBaiHoc: ${err.message || String(err)}`);
+    } finally {
+      setIsSyncingSheet(false);
+      setTimeout(() => setSheetSyncMessage(null), 4000);
+    }
   };
 
   const getTopicName = (topicId: string) => {
@@ -205,7 +262,27 @@ export const LessonManagement: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-2 shrink-0 flex-wrap">
+          <button
+            type="button"
+            disabled={isSyncingSheet}
+            onClick={handleSyncToGoogleSheet}
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 rounded-lg transition-colors shadow-2xs cursor-pointer"
+            title="Lưu danh mục tên bài học vào Google Sheet (sheet TenBaiHoc)"
+          >
+            {isSyncingSheet ? <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-600" /> : <UploadCloud className="w-3.5 h-3.5 text-emerald-600" />}
+            <span>Lưu lên Google Sheet (TenBaiHoc)</span>
+          </button>
+          <button
+            type="button"
+            disabled={isSyncingSheet}
+            onClick={handlePullFromGoogleSheet}
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-sky-800 bg-sky-50 hover:bg-sky-100 border border-sky-300 rounded-lg transition-colors shadow-2xs cursor-pointer"
+            title="Tải danh mục tên bài học từ Google Sheet về hệ thống"
+          >
+            <DownloadCloud className="w-3.5 h-3.5 text-sky-600" />
+            <span>Tải từ Sheet TenBaiHoc</span>
+          </button>
           <button
             type="button"
             onClick={() => setIsResetConfirmOpen(true)}
@@ -225,6 +302,14 @@ export const LessonManagement: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* Sheet sync notification banner */}
+      {sheetSyncMessage && (
+        <div className="flex items-center gap-2 p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs animate-in fade-in">
+          <FileSpreadsheet className="w-4 h-4 text-emerald-600 shrink-0" />
+          <span className="font-medium">{sheetSyncMessage}</span>
+        </div>
+      )}
 
       {/* Grade Selector Tabs */}
       <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 pb-2">

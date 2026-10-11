@@ -100,6 +100,15 @@ export class GoogleDriveService {
       throw new Error('Chưa đăng nhập tài khoản Google để thao tác với Google Drive.');
     }
 
+    // Luôn ưu tiên thư mục lưu trữ được chỉ định của nhà trường (1hpLRzYT60uGtV1DcqaRnAlTBA3q5w1Nc)
+    const configuredFolderId = getSavedDriveFolderId();
+    const configuredFolderUrl = getSavedDriveFolderUrl();
+    if (configuredFolderId) {
+      localStorage.setItem(FOLDER_ID_KEY, configuredFolderId);
+      localStorage.setItem(FOLDER_URL_KEY, configuredFolderUrl);
+      return { folderId: configuredFolderId, folderUrl: configuredFolderUrl };
+    }
+
     const cachedId = localStorage.getItem(FOLDER_ID_KEY);
     const cachedUrl = localStorage.getItem(FOLDER_URL_KEY);
     if (cachedId && cachedUrl) {

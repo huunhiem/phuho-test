@@ -8,12 +8,14 @@ import {
   BarChart3,
   CheckCircle2,
   Clock,
-  ArrowRight
+  ArrowRight,
+  User as UserIcon
 } from 'lucide-react';
 import { User } from '../../types';
 import { LMSStorageService } from '../../services/storage';
 import { onStorageChange } from '../../services/storageEvents';
 import { NavTab } from '../Sidebar';
+import { AccountProfileModal } from '../profile/AccountProfileModal';
 
 interface TeacherDashboardProps {
   currentUser: User;
@@ -26,6 +28,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ currentUser,
   const [tests, setTests] = useState(() => LMSStorageService.getTests());
   const [assignments, setAssignments] = useState(() => LMSStorageService.getAssignments());
   const [submissions, setSubmissions] = useState(() => LMSStorageService.getSubmissions());
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
 
   useEffect(() => {
     const unsub = onStorageChange(() => {
@@ -38,9 +41,28 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ currentUser,
     return () => unsub();
   }, []);
 
+  const isPrivileged = currentUser.role === 'ADMIN' || currentUser.role === 'PRINCIPAL';
+  const visibleClasses = isPrivileged
+    ? classes
+    : classes.filter((c) => currentUser.assignedClassIds?.includes(c.id));
+
+  const visibleTests = isPrivileged
+    ? tests
+    : tests.filter((t) => t.createdBy === currentUser.id);
+
+  const visibleAssignments = isPrivileged
+    ? assignments
+    : assignments.filter((a) => a.assignedBy === currentUser.id);
+
+  const visibleAssignmentIds = new Set(visibleAssignments.map((a) => a.id));
+
+  const visibleSubmissions = isPrivileged
+    ? submissions
+    : submissions.filter((s) => visibleAssignmentIds.has(s.assignmentId));
+
   const teacherQuestions = questions.filter((q) => q.createdBy === currentUser.id);
-  const activeAssignments = assignments.filter((a) => a.status === 'ACTIVE');
-  const pendingEssaySubs = submissions.filter((s) => s.status === 'PENDING_ESSAY_GRADING');
+  const activeAssignments = visibleAssignments.filter((a) => a.status === 'ACTIVE');
+  const pendingEssaySubs = visibleSubmissions.filter((s) => s.status === 'PENDING_ESSAY_GRADING');
 
   // Score distribution statistics
   let excellentCount = 0; // >= 8.0
@@ -48,14 +70,14 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ currentUser,
   let averageCount = 0;   // 5.0 - 6.4
   let belowCount = 0;     // < 5.0
 
-  submissions.forEach((s) => {
+  visibleSubmissions.forEach((s) => {
     if (s.score >= 8.0) excellentCount++;
     else if (s.score >= 6.5) goodCount++;
     else if (s.score >= 5.0) averageCount++;
     else belowCount++;
   });
 
-  const totalSubs = submissions.length || 1;
+  const totalSubs = visibleSubmissions.length || 1;
   const passRate = Math.round(((excellentCount + goodCount + averageCount) / totalSubs) * 100);
 
   return (
@@ -75,24 +97,42 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ currentUser,
             </p>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setIsProfileOpen(true)}
+              className="px-3.5 py-2 text-xs font-semibold bg-white/10 hover:bg-white/20 text-white border border-white/20 rounded-lg transition-colors cursor-pointer inline-flex items-center gap-1.5"
+            >
+              <UserIcon className="w-3.5 h-3.5" />
+              <span>Hồ sơ cá nhân</span>
+            </button>
             <button
               type="button"
               onClick={() => onNavigate('question_bank')}
-              className="px-4 py-2 text-xs font-semibold bg-white text-indigo-900 hover:bg-indigo-50 rounded-lg shadow-xs transition-colors"
+              className="px-4 py-2 text-xs font-semibold bg-white text-indigo-900 hover:bg-indigo-50 rounded-lg shadow-xs transition-colors cursor-pointer"
             >
               + Soạn câu hỏi
             </button>
             <button
               type="button"
               onClick={() => onNavigate('test_builder')}
-              className="px-4 py-2 text-xs font-semibold bg-indigo-600/80 hover:bg-indigo-600 text-white border border-indigo-400/30 rounded-lg transition-colors"
+              className="px-4 py-2 text-xs font-semibold bg-indigo-600/80 hover:bg-indigo-600 text-white border border-indigo-400/30 rounded-lg transition-colors cursor-pointer"
             >
               + Tạo đề kiểm tra
             </button>
           </div>
         </div>
       </div>
+
+      {/* Account Profile Modal */}
+      <AccountProfileModal
+        isOpen={isProfileOpen}
+        onClose={() => setIsProfileOpen(false)}
+        currentUser={currentUser}
+        onUserUpdated={() => {
+          setClasses(LMSStorageService.getClasses());
+        }}
+      />
 
       {/* Metrics Row */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -120,7 +160,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ currentUser,
             </div>
           </div>
           <div className="mt-2 flex items-baseline gap-2">
-            <span className="text-2xl font-bold text-slate-900">{tests.length}</span>
+            <span className="text-2xl font-bold text-slate-900">{visibleTests.length}</span>
             <span className="text-xs text-slate-500">bộ đề</span>
           </div>
           <div className="mt-2 text-xs text-slate-500">
@@ -151,7 +191,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ currentUser,
           </div>
           <div className="mt-2 flex items-baseline gap-2">
             <span className="text-2xl font-bold text-slate-900">{passRate}%</span>
-            <span className="text-xs text-emerald-600 font-medium">({submissions.length} bài nộp)</span>
+            <span className="text-xs text-emerald-600 font-medium">({visibleSubmissions.length} bài nộp)</span>
           </div>
           <div className="mt-2 text-xs text-slate-500">
             {pendingEssaySubs.length > 0 ? (

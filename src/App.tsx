@@ -265,6 +265,7 @@ export default function App() {
         currentUser={currentUser}
         onResetData={handleResetData}
         onLogout={handleLogout}
+        onUserUpdated={(updatedUser) => setCurrentUser(updatedUser)}
         mobileMenuOpen={mobileMenuOpen}
         setMobileMenuOpen={setMobileMenuOpen}
       />

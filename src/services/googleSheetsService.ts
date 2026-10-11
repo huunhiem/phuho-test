@@ -9,7 +9,7 @@ import {
 } from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
 import { LMSStorageService } from './storage';
-import { onStorageChange } from './storageEvents';
+import { onStorageChange, notifyChange } from './storageEvents';
 import {
   APPS_SCRIPT_URL_KEY,
   DEFAULT_APPS_SCRIPT_URL,
@@ -50,7 +50,8 @@ import {
   QuestionDifficulty,
   QuestionType,
   OptionItem,
-  TrueFalseStatement
+  TrueFalseStatement,
+  Submission
 } from '../types';
 import { GoogleDriveService } from './googleDriveService';
 
@@ -514,6 +515,7 @@ export const REQUIRED_SHEETS = [
   'TenBaiHoc',
   'CauHoi',
   'DeThi',
+  'GiaoDe',
   'BangDiem'
 ];
 
@@ -524,6 +526,7 @@ export const REQUIRED_SHEETS = [
 export class GoogleSheetsService {
   private static syncTimeout: any = null;
   private static pendingEntities: Set<string> = new Set();
+  private static verifiedSpreadsheetIds: Set<string> = new Set();
 
   /**
    * Tạo một Google Spreadsheet mới làm Database cho LMS với đầy đủ 7 sheet quản lý
@@ -569,9 +572,12 @@ export class GoogleSheetsService {
   }
 
   /**
-   * Đảm bảo tất cả 7 sheet quản lý luôn tồn tại trên bảng tính
+   * Đảm bảo tất cả sheet quản lý luôn tồn tại trên bảng tính (có bộ nhớ đệm tăng tốc)
    */
-  static async ensureSheetsExist(spreadsheetId: string, accessToken: string): Promise<void> {
+  static async ensureSheetsExist(spreadsheetId: string, accessToken: string, force = false): Promise<void> {
+    if (!force && this.verifiedSpreadsheetIds.has(spreadsheetId)) {
+      return;
+    }
     try {
       const metaRes = await fetch(
         `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets.properties.title`,
@@ -596,9 +602,32 @@ export class GoogleSheetsService {
             body: JSON.stringify({ requests })
           });
         }
+        this.verifiedSpreadsheetIds.add(spreadsheetId);
       }
     } catch (e) {
       console.warn('Could not auto-add missing sheets:', e);
+    }
+  }
+
+  /**
+   * Xóa hàng loạt dữ liệu cũ (batchClear) trong 1 request duy nhất để tối ưu tốc độ gấp 5-10 lần
+   */
+  private static async batchClearRanges(spreadsheetId: string, ranges: string[], accessToken: string): Promise<void> {
+    if (!ranges || ranges.length === 0) return;
+    try {
+      await fetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchClear`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ ranges })
+        }
+      );
+    } catch (e) {
+      console.warn('Lỗi batchClear ranges:', e);
     }
   }
 
@@ -625,7 +654,7 @@ export class GoogleSheetsService {
   // --- BUILD ROW DATA HELPERS ---
 
   private static buildTaiKhoanRows(): any[][] {
-    const users = LMSStorageService.getUsers();
+    const users = LMSStorageService.getUsers().filter((u) => u.status !== 'DELETED');
     const classes = LMSStorageService.getClasses();
 
     return [
@@ -643,25 +672,41 @@ export class GoogleSheetsService {
         'Trạng thái (Status)',
         'Ngày tạo'
       ],
-      ...users.map((u) => [
-        u.id,
-        u.username || u.email.split('@')[0],
-        u.password || (u.role === 'STUDENT' ? '123456' : 'phuho@2025'),
-        u.fullName,
-        u.email,
-        u.role,
-        u.studentCode || u.teacherCode || '',
-        u.gradeId ? u.gradeId.replace('grade-', 'Khối ') : '',
-        classes.find((c) => c.id === u.classId)?.name || '',
-        u.phone || '',
-        u.status || 'ACTIVE',
-        u.createdAt
-      ])
+      ...users.map((u) => {
+        let clsName = classes.find((c) => c.id === u.classId)?.name;
+        if (!clsName && u.classId) {
+          if (u.classId.startsWith('cls-')) {
+            clsName = u.classId.replace('cls-', '').replace('-', '/');
+          } else {
+            clsName = u.classId;
+          }
+        }
+        let gradeLabel = '';
+        if (u.gradeId) {
+          gradeLabel = u.gradeId.replace('grade-', 'Khối ');
+        } else if (clsName && clsName.includes('/')) {
+          gradeLabel = `Khối ${clsName.split('/')[0]}`;
+        }
+        return [
+          u.id,
+          u.username || u.email.split('@')[0],
+          u.password || (u.role === 'STUDENT' ? '123456' : 'phuho@2025'),
+          u.fullName,
+          u.email,
+          u.role,
+          u.studentCode || u.teacherCode || '',
+          gradeLabel,
+          clsName || '',
+          u.phone || '',
+          u.status || 'ACTIVE',
+          u.createdAt
+        ];
+      })
     ];
   }
 
   private static buildHocSinhRows(): any[][] {
-    const students = LMSStorageService.getUsers().filter((u) => u.role === 'STUDENT');
+    const students = LMSStorageService.getUsers().filter((u) => u.role === 'STUDENT' && u.status !== 'DELETED');
     const classes = LMSStorageService.getClasses();
 
     return [
@@ -678,24 +723,40 @@ export class GoogleSheetsService {
         'Trạng thái',
         'Ngày tạo'
       ],
-      ...students.map((u) => [
-        u.id,
-        u.fullName,
-        u.studentCode || '',
-        u.username || u.email.split('@')[0],
-        u.password || '123456',
-        classes.find((c) => c.id === u.classId)?.name || '6/1',
-        u.gradeId ? u.gradeId.replace('grade-', 'Khối ') : 'Khối 6',
-        u.email,
-        u.phone || '',
-        u.status || 'ACTIVE',
-        u.createdAt
-      ])
+      ...students.map((u) => {
+        let clsName = classes.find((c) => c.id === u.classId)?.name;
+        if (!clsName && u.classId) {
+          if (u.classId.startsWith('cls-')) {
+            clsName = u.classId.replace('cls-', '').replace('-', '/');
+          } else {
+            clsName = u.classId;
+          }
+        }
+        let gradeLabel = '';
+        if (u.gradeId) {
+          gradeLabel = u.gradeId.replace('grade-', 'Khối ');
+        } else if (clsName && clsName.includes('/')) {
+          gradeLabel = `Khối ${clsName.split('/')[0]}`;
+        }
+        return [
+          u.id,
+          u.fullName,
+          u.studentCode || '',
+          u.username || u.email.split('@')[0],
+          u.password || '123456',
+          clsName || '',
+          gradeLabel,
+          u.email,
+          u.phone || '',
+          u.status || 'ACTIVE',
+          u.createdAt
+        ];
+      })
     ];
   }
 
   private static buildGiaoVienRows(): any[][] {
-    const staff = LMSStorageService.getUsers().filter((u) => u.role !== 'STUDENT');
+    const staff = LMSStorageService.getUsers().filter((u) => u.role !== 'STUDENT' && u.status !== 'DELETED');
     const classes = LMSStorageService.getClasses();
 
     return [
@@ -722,7 +783,7 @@ export class GoogleSheetsService {
         u.email,
         u.phone || '',
         u.assignedClassIds
-          ? u.assignedClassIds.map((cid) => classes.find((c) => c.id === cid)?.name).filter(Boolean).join(', ')
+          ? u.assignedClassIds.map((cid) => classes.find((c) => c.id === cid)?.name || cid.replace('cls-', '').replace('-', '/')).filter(Boolean).join(', ')
           : 'Toàn trường',
         u.status || 'ACTIVE',
         u.createdAt
@@ -816,34 +877,78 @@ export class GoogleSheetsService {
   private static buildDeThiRows(): any[][] {
     const tests = LMSStorageService.getTests();
     return [
-      ['ID', 'Tên đề thi', 'Khối', 'Thời gian (phút)', 'Số câu', 'Mã đề', 'Tác giả', 'Ngày tạo'],
+      ['ID', 'Tên đề thi', 'Khối', 'Thời gian (phút)', 'Số câu', 'Mã đề', 'Tác giả', 'Ngày tạo', 'Trạng thái'],
       ...tests.map((t) => [
         t.id,
         t.title,
-        t.gradeLevel,
+        `Khối ${t.gradeLevel}`,
         t.durationMinutes,
         t.totalQuestions,
-        t.variants.map((v) => v.code).join(', '),
-        t.authorName,
-        t.createdAt
+        (t.variants || []).map((v) => v.code).join(', ') || '101',
+        t.authorName || 'Giáo viên',
+        t.createdAt || '',
+        t.status || 'READY'
+      ])
+    ];
+  }
+
+  private static buildGiaoDeRows(): any[][] {
+    const assignments = LMSStorageService.getAssignments();
+    return [
+      [
+        'ID Đợt giao',
+        'Tên bài kiểm tra',
+        'Khối lớp',
+        'Danh sách lớp',
+        'Thời gian bắt đầu',
+        'Thời gian kết thúc',
+        'Mật khẩu phòng thi',
+        'Cho xem đáp án sau nộp',
+        'Trộn thứ tự câu hỏi',
+        'Người giao đề',
+        'Ngày tạo',
+        'Trạng thái'
+      ],
+      ...assignments.map((a) => [
+        a.id,
+        a.testTitle,
+        `Khối ${a.gradeLevel}`,
+        (a.classNames || []).join(', '),
+        a.startTime ? new Date(a.startTime).toLocaleString('vi-VN') : '',
+        a.endTime ? new Date(a.endTime).toLocaleString('vi-VN') : '',
+        a.password || 'Không có',
+        a.allowReviewAfterSubmit ? 'Có' : 'Không',
+        a.shuffleQuestions ? 'Có' : 'Không',
+        a.assignedByName || 'Giáo viên',
+        a.createdAt || '',
+        a.status || 'ACTIVE'
       ])
     ];
   }
 
   private static buildBangDiemRows(): any[][] {
     const submissions = LMSStorageService.getSubmissions();
+    const activeUsers = LMSStorageService.getUsers().filter((u) => u.status !== 'DELETED' && u.status !== 'LOCKED');
+    const activeUserIds = new Set(activeUsers.map((u) => u.id));
+    const activeStudentCodes = new Set(activeUsers.map((u) => u.studentCode).filter(Boolean));
+
+    // Chỉ lưu và hiển thị kết quả của các tài khoản còn đang hoạt động
+    const activeSubmissions = submissions.filter(
+      (s) => activeUserIds.has(s.studentId) || (s.studentCode && activeStudentCodes.has(s.studentCode))
+    );
+
     return [
       ['ID Bài nộp', 'Họ tên học sinh', 'Mã số HS', 'Lớp', 'Tên bài thi', 'Mã đề', 'Điểm số', 'Đúng/Tổng câu', 'Thời gian nộp'],
-      ...submissions.map((s) => [
+      ...activeSubmissions.map((s) => [
         s.id,
         s.studentName,
-        s.studentCode,
-        s.className,
+        s.studentCode || '',
+        s.className || '',
         s.testTitle,
-        s.variantCode,
+        s.variantCode || '101',
         s.score,
         `${s.correctCount}/${s.totalQuestions}`,
-        new Date(s.submittedAt).toLocaleString('vi-VN')
+        s.submittedAt ? new Date(s.submittedAt).toLocaleString('vi-VN') : ''
       ])
     ];
   }
@@ -862,16 +967,15 @@ export class GoogleSheetsService {
       { range: 'TenBaiHoc!A1', values: this.buildTenBaiHocRows() },
       { range: 'CauHoi!A1', values: this.buildCauHoiRows() },
       { range: 'DeThi!A1', values: this.buildDeThiRows() },
+      { range: 'GiaoDe!A1', values: this.buildGiaoDeRows() },
       { range: 'BangDiem!A1', values: this.buildBangDiemRows() }
     ];
 
-    // Clear old contents to prevent ghost rows
-    for (const item of batchData) {
-      const sheetName = item.range.split('!')[0];
-      await this.clearRange(spreadsheetId, `${sheetName}!A:Z`, accessToken);
-    }
+    // Xóa nhanh toàn bộ nội dung cũ trong 1 request duy nhất (batchClear) để tránh dòng ma và tăng tốc
+    const rangesToClear = batchData.map((item) => `${item.range.split('!')[0]}!A:Z`);
+    await this.batchClearRanges(spreadsheetId, rangesToClear, accessToken);
 
-    const res = await fetch(
+    let res = await fetch(
       `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchUpdate`,
       {
         method: 'POST',
@@ -880,15 +984,34 @@ export class GoogleSheetsService {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          valueInputOption: 'USER_ENTERED',
+          valueInputOption: 'RAW',
           data: batchData
         })
       }
     );
 
     if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.error?.message || 'Không thể đồng bộ dữ liệu lên Google Sheet');
+      const errText = await res.text();
+      if (errText.includes('Unable to parse range') || errText.includes('not found')) {
+        await this.ensureSheetsExist(spreadsheetId, accessToken, true);
+        res = await fetch(
+          `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchUpdate`,
+          {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              valueInputOption: 'RAW',
+              data: batchData
+            })
+          }
+        );
+      }
+      if (!res.ok) {
+        throw new Error('Không thể đồng bộ dữ liệu lên Google Sheet');
+      }
     }
   }
 
@@ -896,7 +1019,7 @@ export class GoogleSheetsService {
    * Tự động đồng bộ một thực thể cụ thể lên Google Sheet
    */
   static async syncEntity(
-    entity: 'users' | 'classes' | 'questions' | 'tests' | 'submissions' | 'lessons' | 'all',
+    entity: 'users' | 'classes' | 'questions' | 'tests' | 'assignments' | 'submissions' | 'lessons' | 'all',
     spreadsheetId: string,
     accessToken: string
   ): Promise<void> {
@@ -928,18 +1051,21 @@ export class GoogleSheetsService {
       updates.push({ range: 'DeThi!A1', values: this.buildDeThiRows() });
     }
 
+    if (entity === 'assignments' || entity === 'all') {
+      updates.push({ range: 'GiaoDe!A1', values: this.buildGiaoDeRows() });
+    }
+
     if (entity === 'submissions' || entity === 'all') {
       updates.push({ range: 'BangDiem!A1', values: this.buildBangDiemRows() });
     }
 
     if (updates.length === 0) return;
 
-    for (const item of updates) {
-      const sheetName = item.range.split('!')[0];
-      await this.clearRange(spreadsheetId, `${sheetName}!A:Z`, accessToken);
-    }
+    // Xóa nhanh toàn bộ nội dung cũ trong 1 request duy nhất (batchClear) để tăng tốc độ ghi dữ liệu
+    const rangesToClear = updates.map((item) => `${item.range.split('!')[0]}!A:Z`);
+    await this.batchClearRanges(spreadsheetId, rangesToClear, accessToken);
 
-    const res = await fetch(
+    let res = await fetch(
       `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchUpdate`,
       {
         method: 'POST',
@@ -948,24 +1074,45 @@ export class GoogleSheetsService {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          valueInputOption: 'USER_ENTERED',
+          valueInputOption: 'RAW',
           data: updates
         })
       }
     );
 
     if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.error?.message || `Lỗi đồng bộ ${entity} lên Google Sheet`);
+      const errText = await res.text();
+      if (errText.includes('Unable to parse range') || errText.includes('not found')) {
+        await this.ensureSheetsExist(spreadsheetId, accessToken, true);
+        res = await fetch(
+          `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values:batchUpdate`,
+          {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              valueInputOption: 'RAW',
+              data: updates
+            })
+          }
+        );
+      }
+      if (!res.ok) {
+        throw new Error(`Lỗi đồng bộ ${entity} lên Google Sheet: ${res.statusText}`);
+      }
     }
   }
 
   /**
    * TỰ ĐỘNG CẬP NHẬT GOOGLE SHEET TRONG NỀN (BACKGROUND AUTO-SYNC)
-   * Được gọi tự động mỗi khi thêm/sửa/xóa Lớp, Học sinh, Người dùng, Câu hỏi,...
+   * Được gọi tự động mỗi khi thêm/sửa/xóa Lớp, Học sinh, Người dùng, Đề thi, Giao bài,...
    * Không cần người dùng bấm đồng bộ thủ công!
    */
-  static triggerAutoSync(entity: 'users' | 'classes' | 'questions' | 'tests' | 'submissions' | 'lessons' | 'all'): void {
+  static triggerAutoSync(
+    entity: 'users' | 'classes' | 'questions' | 'tests' | 'assignments' | 'submissions' | 'lessons' | 'all'
+  ): void {
     if (!isAutoSyncEnabled()) return;
 
     const sheetId = getSavedSheetId();
@@ -991,93 +1138,73 @@ export class GoogleSheetsService {
       this.pendingEntities.clear();
 
       try {
+        let oauthSucceeded = false;
         if (sheetId && token) {
-          const hasAll = entitiesToSync.includes('all');
-          if (hasAll) {
-            await this.syncEntity('all', sheetId, token);
-            try {
-              await GoogleDriveService.saveQuestionsToDrive(LMSStorageService.getQuestions(), token);
-            } catch (e) {
-              console.warn('Lỗi tự động lưu câu hỏi lên Drive:', e);
-            }
-          } else {
-            for (const ent of entitiesToSync) {
-              await this.syncEntity(ent as any, sheetId, token);
-            }
-            if (entitiesToSync.includes('questions')) {
+          try {
+            const hasAll = entitiesToSync.includes('all');
+            if (hasAll) {
+              await this.syncEntity('all', sheetId, token);
               try {
                 await GoogleDriveService.saveQuestionsToDrive(LMSStorageService.getQuestions(), token);
               } catch (e) {
                 console.warn('Lỗi tự động lưu câu hỏi lên Drive:', e);
               }
+            } else {
+              for (const ent of entitiesToSync) {
+                await this.syncEntity(ent as any, sheetId, token);
+              }
+              if (entitiesToSync.includes('questions')) {
+                try {
+                  await GoogleDriveService.saveQuestionsToDrive(LMSStorageService.getQuestions(), token);
+                } catch (e) {
+                  console.warn('Lỗi tự động lưu câu hỏi lên Drive:', e);
+                }
+              }
             }
+            oauthSucceeded = true;
+          } catch (oauthErr) {
+            console.warn('Lỗi đồng bộ qua OAuth (sẽ tự động ghi qua Apps Script Web App):', oauthErr);
           }
         }
 
         // Tự động đẩy dữ liệu lên Google Apps Script Web App nếu có cấu hình
         if (scriptUrl) {
-          for (const ent of entitiesToSync) {
-            if (ent === 'users' || ent === 'all') {
-              const users = LMSStorageService.getUsers();
-              if (users.length > 0) {
-                const u = users[0];
-                this.postToAppsScript({
-                  action: 'addUser',
-                  id: u.id,
-                  username: u.username,
-                  password: u.password,
-                  fullName: u.fullName,
-                  email: u.email,
-                  role: u.role,
-                  code: u.studentCode || u.teacherCode || '',
-                  className: u.classId || '',
-                  phone: u.phone || ''
-                });
-              }
-            } else if (ent === 'submissions' || ent === 'all') {
-              const subs = LMSStorageService.getSubmissions();
-              if (subs.length > 0) {
-                const s = subs[0];
-                this.postToAppsScript({
-                  action: 'addSubmission',
-                  id: s.id,
-                  studentName: s.studentName,
-                  studentCode: s.studentCode,
-                  className: s.className,
-                  testTitle: s.testTitle,
-                  variantCode: s.variantCode || '101',
-                  score: s.score,
-                  correctCount: s.correctCount,
-                  totalQuestions: s.totalQuestions
-                });
-              }
-            } else if (ent === 'questions' || ent === 'all') {
-              const qs = LMSStorageService.getQuestions();
-              if (qs.length > 0) {
-                const q = qs[0];
-                this.postToAppsScript({
-                  action: 'saveQuestion',
-                  id: q.id,
-                  code: q.code,
-                  content: q.content,
-                  grade: q.gradeLevel,
-                  gradeLevel: q.gradeLevel,
-                  topic: q.topic,
-                  topicId: q.topic,
-                  lessonTitle: q.lessonTitle || '',
-                  learningOutcome: q.learningOutcome || '',
-                  difficulty: q.difficulty,
-                  type: q.type,
-                  options: q.options
-                    ? q.options.map((o) => `${o.isCorrect ? '[x]' : '[ ]'} ${o.text}`).join(' | ')
-                    : q.correctAnswerText || q.essaySampleAnswer || '',
-                  explanation: q.explanation || '',
-                  imageDriveUrl: q.imageDriveUrl || q.imageUrl || '',
-                  authorName: q.authorName || 'Giáo viên',
-                  createdAt: q.createdAt
-                });
-              }
-            }
+          // Đồng bộ nhanh toàn bộ các sheet qua payload batch
+          const sheetsToPush: { name: string; rows: any[][] }[] = [];
+          if (entitiesToSync.includes('users') || entitiesToSync.includes('all')) {
+            sheetsToPush.push(
+              { name: 'TaiKhoan', rows: this.buildTaiKhoanRows() },
+              { name: 'HocSinh', rows: this.buildHocSinhRows() },
+              { name: 'GiaoVien', rows: this.buildGiaoVienRows() }
+            );
+          }
+          if (entitiesToSync.includes('classes') || entitiesToSync.includes('all')) {
+            sheetsToPush.push({ name: 'LopHoc', rows: this.buildLopHocRows() });
+          }
+          if (entitiesToSync.includes('lessons') || entitiesToSync.includes('all')) {
+            sheetsToPush.push({ name: 'TenBaiHoc', rows: this.buildTenBaiHocRows() });
+          }
+          if (entitiesToSync.includes('questions') || entitiesToSync.includes('all')) {
+            sheetsToPush.push({ name: 'CauHoi', rows: this.buildCauHoiRows() });
+          }
+          if (entitiesToSync.includes('tests') || entitiesToSync.includes('all')) {
+            sheetsToPush.push({ name: 'DeThi', rows: this.buildDeThiRows() });
+          }
+          if (entitiesToSync.includes('assignments') || entitiesToSync.includes('all')) {
+            sheetsToPush.push({ name: 'GiaoDe', rows: this.buildGiaoDeRows() });
+          }
+          if (entitiesToSync.includes('submissions') || entitiesToSync.includes('all')) {
+            sheetsToPush.push({ name: 'BangDiem', rows: this.buildBangDiemRows() });
+          }
+
+          if (sheetsToPush.length > 0) {
+            await this.postToAppsScript({
+              action: 'batchPushAllData',
+              sheetId,
+              folderId: getSavedDriveFolderId(),
+              sheets: sheetsToPush,
+              allQuestions: LMSStorageService.getQuestions()
+            });
           }
         }
 
@@ -1137,7 +1264,6 @@ export class GoogleSheetsService {
     }
 
     const classes = LMSStorageService.getClasses();
-    const existingUsers = LMSStorageService.getUsers();
     let updatedCount = 0;
 
     const importedUsers: User[] = [];
@@ -1152,9 +1278,22 @@ export class GoogleSheetsService {
       const email = row[4] || `${username}@thcs-phuho.edu.vn`;
       const role = (row[5] as UserRole) || 'STUDENT';
       const code = row[6] || '';
-      const className = row[8] || '';
+      let className = String(row[8] || '').trim();
+      if (className.startsWith('Lớp ')) className = className.replace('Lớp ', '').trim();
+      if (className.includes('T') && className.includes('-')) {
+        const d = new Date(className);
+        if (!isNaN(d.getTime())) {
+          className = `${d.getMonth() + 1}/${d.getDate()}`;
+        }
+      }
 
-      const matchedClass = classes.find((c) => c.name === className);
+      let matchedClass = classes.find((c) => c.name === className || c.id === className);
+      if (!matchedClass && (className === '8/7' || className === '8.7' || className === '8-7')) {
+        matchedClass = classes.find((c) => c.id === 'cls-8-7');
+      }
+      if (!matchedClass && (className === '8/8' || className === '8.8' || className === '8-8')) {
+        matchedClass = classes.find((c) => c.id === 'cls-8-8');
+      }
 
       const userObj: User = {
         id,
@@ -1166,7 +1305,7 @@ export class GoogleSheetsService {
         phone: row[9] || '',
         schoolId: 'school-phuho-01',
         classId: matchedClass?.id,
-        gradeId: matchedClass?.gradeId || (role === 'STUDENT' ? 'grade-6' : undefined),
+        gradeId: matchedClass?.gradeId || (role === 'STUDENT' ? (className.startsWith('8') ? 'grade-8' : 'grade-6') : undefined),
         studentCode: role === 'STUDENT' ? code : undefined,
         teacherCode: role !== 'STUDENT' ? code : undefined,
         status: (row[10] === 'LOCKED' ? 'LOCKED' : 'ACTIVE') as 'ACTIVE' | 'LOCKED',
@@ -1178,12 +1317,8 @@ export class GoogleSheetsService {
     }
 
     if (importedUsers.length > 0) {
-      // Merge users by username or email or id
-      const userMap = new Map<string, User>();
-      existingUsers.forEach((u) => userMap.set(u.id, u));
-      importedUsers.forEach((u) => userMap.set(u.id, u));
-      const merged = Array.from(userMap.values());
-      localStorage.setItem('phuho_lms_users', JSON.stringify(merged));
+      LMSStorageService.importStudents(importedUsers);
+      notifyChange('users');
     }
 
     return updatedCount;
@@ -1209,10 +1344,23 @@ export class GoogleSheetsService {
       const studentCode = row[2] || `PH25-${Math.floor(100000 + Math.random() * 900000)}`;
       const username = row[3] || `hs.${studentCode.toLowerCase().replace(/[^a-z0-9]/g, '')}`;
       const password = row[4] || '123456';
-      const className = row[5] || '6/1';
+      let className = String(row[5] || '6/1').trim();
+      if (className.startsWith('Lớp ')) className = className.replace('Lớp ', '').trim();
+      if (className.includes('T') && className.includes('-')) {
+        const d = new Date(className);
+        if (!isNaN(d.getTime())) {
+          className = `${d.getMonth() + 1}/${d.getDate()}`;
+        }
+      }
       const email = row[7] || `${username}@thcs-phuho.edu.vn`;
 
-      const matchedClass = classes.find((c) => c.name === className) || classes[0];
+      let matchedClass = classes.find((c) => c.name === className || c.id === className);
+      if (!matchedClass && (className === '8/7' || className === '8.7' || className === '8-7')) {
+        matchedClass = classes.find((c) => c.id === 'cls-8-7');
+      }
+      if (!matchedClass && (className === '8/8' || className === '8.8' || className === '8-8')) {
+        matchedClass = classes.find((c) => c.id === 'cls-8-8');
+      }
 
       importedUsers.push({
         id,
@@ -1223,7 +1371,7 @@ export class GoogleSheetsService {
         role: 'STUDENT',
         schoolId: 'school-phuho-01',
         classId: matchedClass?.id,
-        gradeId: matchedClass?.gradeId || 'grade-6',
+        gradeId: matchedClass?.gradeId || (className.startsWith('8') ? 'grade-8' : 'grade-6'),
         studentCode,
         phone: row[8] || '',
         status: (row[9] === 'LOCKED' ? 'LOCKED' : 'ACTIVE') as 'ACTIVE' | 'LOCKED',
@@ -1233,9 +1381,84 @@ export class GoogleSheetsService {
 
     if (importedUsers.length > 0) {
       LMSStorageService.importStudents(importedUsers);
+      notifyChange('users');
     }
 
     return importedUsers.length;
+  }
+
+  /**
+   * Tải kết quả bài thi từ sheet BangDiem về LMS
+   * Chỉ nạp điểm số của các tài khoản còn đang hoạt động (loại bỏ hoàn toàn tài khoản đã bị xóa)
+   */
+  static async pullSubmissionsFromSheet(
+    spreadsheetId: string,
+    accessToken: string
+  ): Promise<number> {
+    const rows = await this.readSheetValues(spreadsheetId, 'BangDiem!A2:I', accessToken);
+    if (!rows || rows.length === 0) return 0;
+
+    const activeUsers = LMSStorageService.getUsers().filter((u) => u.status !== 'DELETED');
+    const activeStudentCodes = new Set(activeUsers.map((u) => u.studentCode).filter(Boolean));
+    const activeUserByName = new Map(activeUsers.map((u) => [u.fullName.toLowerCase(), u]));
+
+    const importedSubs: Submission[] = [];
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      if (!row || row.length < 5) continue;
+      // Headers: ID Bài nộp, Họ tên học sinh, Mã số HS, Lớp, Tên bài thi, Mã đề, Điểm số, Đúng/Tổng câu, Thời gian nộp
+      const id = row[0] || `sub-gsheet-${Date.now()}-${i}`;
+      const studentName = String(row[1] || 'Học sinh').trim();
+      const studentCode = String(row[2] || '').trim();
+      const className = String(row[3] || '').trim();
+      const testTitle = String(row[4] || 'Bài kiểm tra').trim();
+      const variantCode = String(row[5] || '101').trim();
+      const score = parseFloat(String(row[6] || '0')) || 0;
+      const countPart = String(row[7] || '0/10').split('/');
+      const correctCount = parseInt(countPart[0], 10) || 0;
+      const totalQuestions = parseInt(countPart[1], 10) || 10;
+      const submittedAt = row[8] ? new Date(row[8]).toISOString() : new Date().toISOString();
+
+      // Chỉ chấp nhận nếu thuộc tài khoản còn đang hoạt động
+      const isStudentCodeActive = studentCode && activeStudentCodes.has(studentCode);
+      const matchedUser = isStudentCodeActive
+        ? activeUsers.find((u) => u.studentCode === studentCode)
+        : activeUserByName.get(studentName.toLowerCase());
+
+      if (!matchedUser && !isStudentCodeActive) {
+        // Tài khoản đã bị xóa -> Bỏ qua không nạp
+        continue;
+      }
+
+      const studentId = matchedUser?.id || `user-student-${studentCode}`;
+
+      importedSubs.push({
+        id,
+        assignmentId: 'assign-sync',
+        testId: 'test-sync',
+        studentId,
+        studentName: matchedUser?.fullName || studentName,
+        studentCode: matchedUser?.studentCode || studentCode,
+        classId: matchedUser?.classId || '',
+        className: className || '8/7',
+        testTitle,
+        variantCode,
+        answers: {},
+        score,
+        totalQuestions,
+        correctCount,
+        submittedAt,
+        status: 'COMPLETED'
+      });
+    }
+
+    if (importedSubs.length > 0) {
+      LMSStorageService.importSubmissions(importedSubs);
+      notifyChange('submissions');
+    }
+
+    return importedSubs.length;
   }
 
   /**
@@ -1327,6 +1550,51 @@ export class GoogleSheetsService {
         if (importedQuestions.length > 0) {
           LMSStorageService.importQuestions(importedQuestions);
           return { success: true, count: importedQuestions.length };
+        }
+      }
+      return { success: true, count: 0 };
+    } catch (err: any) {
+      return { success: false, count: 0, error: err.message };
+    }
+  }
+
+  /**
+   * Tải danh sách tên bài học từ Google Sheet (sheet TenBaiHoc) qua Apps Script
+   * Không yêu cầu đăng nhập Google OAuth
+   */
+  static async pullLessonsFromAppsScript(): Promise<{ success: boolean; count: number; error?: string }> {
+    const scriptUrl = getAppsScriptUrl();
+    if (!scriptUrl) return { success: false, count: 0, error: 'Chưa có Apps Script URL' };
+    const sheetId = getSavedSheetId();
+    try {
+      const url = `${scriptUrl}?action=getLessons${sheetId ? `&sheetId=${encodeURIComponent(sheetId)}` : ''}`;
+      const res = await fetch(url);
+      if (!res.ok) return { success: false, count: 0, error: `HTTP ${res.status}` };
+      const data = await res.json();
+      if (Array.isArray(data) && data.length > 1) {
+        const rows = data.slice(1);
+        const importedLessons: Lesson[] = [];
+        for (let i = 0; i < rows.length; i++) {
+          const row = rows[i];
+          if (!row || row.length < 5) continue;
+          const rawGrade = String(row[1] || '6');
+          const gradeLevel = parseInt(rawGrade.replace(/[^0-9]/g, ''), 10) || 6;
+          const title = row[5] || row[4] || '';
+          if (!title || !String(title).trim()) continue;
+
+          importedLessons.push({
+            id: row[0] || `les-${gradeLevel}-${Date.now()}-${i}`,
+            gradeLevel,
+            topicId: row[2] || 'top-a',
+            lessonNumber: parseInt(row[4], 10) || (i + 1),
+            title: String(title).trim(),
+            learningOutcomes: row[6] || ''
+          });
+        }
+        if (importedLessons.length > 0) {
+          LMSStorageService.importLessons(importedLessons);
+          notifyChange('lessons');
+          return { success: true, count: importedLessons.length };
         }
       }
       return { success: true, count: 0 };
@@ -1491,7 +1759,13 @@ export class GoogleSheetsService {
               const status = String(row[10] || 'ACTIVE').trim().toUpperCase() === 'LOCKED' ? 'LOCKED' : 'ACTIVE';
               const createdAt = String(row[11] || new Date().toISOString().split('T')[0]);
 
-              const matchedClass = classes.find((c) => c.name === classStr);
+              let matchedClass = classes.find((c) => c.name === classStr || c.id === classStr);
+              if (!matchedClass && (classStr === '8/7' || classStr === '8.7' || classStr === '8-7')) {
+                matchedClass = classes.find((c) => c.id === 'cls-8-7');
+              }
+              if (!matchedClass && (classStr === '8/8' || classStr === '8.8' || classStr === '8-8')) {
+                matchedClass = classes.find((c) => c.id === 'cls-8-8');
+              }
 
               importedUsers.push({
                 id,
@@ -1505,15 +1779,13 @@ export class GoogleSheetsService {
                 classId: matchedClass?.id,
                 gradeId:
                   matchedClass?.gradeId ||
-                  (gradeStr.includes('6')
-                    ? 'grade-6'
+                  (gradeStr.includes('8') || classStr.startsWith('8')
+                    ? 'grade-8'
                     : gradeStr.includes('7')
                     ? 'grade-7'
-                    : gradeStr.includes('8')
-                    ? 'grade-8'
                     : gradeStr.includes('9')
                     ? 'grade-9'
-                    : undefined),
+                    : 'grade-6'),
                 phone,
                 status,
                 schoolId: 'school-phuho-01',
@@ -1522,12 +1794,8 @@ export class GoogleSheetsService {
             }
 
             if (importedUsers.length > 0) {
-              const existingUsers = LMSStorageService.getUsers();
-              const userMap = new Map<string, User>();
-              existingUsers.forEach((u) => userMap.set(u.username.toLowerCase(), u));
-              importedUsers.forEach((u) => userMap.set(u.username.toLowerCase(), u));
-              const merged = Array.from(userMap.values());
-              localStorage.setItem('phuho_lms_users', JSON.stringify(merged));
+              LMSStorageService.importStudents(importedUsers);
+              notifyChange('users');
               usersCount = importedUsers.length;
             }
           }
@@ -1566,6 +1834,13 @@ export class GoogleSheetsService {
       } catch (e) {
         console.warn('Lỗi tải questions từ Apps Script:', e);
         questionsCount = LMSStorageService.getQuestions().length;
+      }
+
+      // 4. Tải danh sách Tên bài học (TenBaiHoc)
+      try {
+        await this.pullLessonsFromAppsScript();
+      } catch (e) {
+        console.warn('Lỗi tải lessons từ Apps Script:', e);
       }
 
       notifyAutoSyncListeners({
@@ -1672,6 +1947,7 @@ export class GoogleSheetsService {
         { name: 'TenBaiHoc', rows: this.buildTenBaiHocRows() },
         { name: 'CauHoi', rows: this.buildCauHoiRows() },
         { name: 'DeThi', rows: this.buildDeThiRows() },
+        { name: 'GiaoDe', rows: this.buildGiaoDeRows() },
         { name: 'BangDiem', rows: this.buildBangDiemRows() }
       ],
       allQuestions
@@ -1684,11 +1960,11 @@ export class GoogleSheetsService {
         notifyAutoSyncListeners({
           status: 'synced',
           lastSyncedTime: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
-          entity: 'Toàn bộ 7 Sheet & Google Drive'
+          entity: 'Toàn bộ các Sheet & Google Drive'
         });
         return {
           success: true,
-          message: 'Đã đẩy thành công toàn bộ 7 sheet (TaiKhoan, HocSinh, GiaoVien, LopHoc, TenBaiHoc, CauHoi, DeThi, BangDiem) lên Google Sheet và sao lưu Google Drive!'
+          message: 'Đã đẩy thành công toàn bộ các sheet (TaiKhoan, HocSinh, GiaoVien, LopHoc, TenBaiHoc, CauHoi, DeThi, GiaoDe, BangDiem) lên Google Sheet và sao lưu Google Drive!'
         };
       }
       return { success: false, message: res.error || 'Không nhận được phản hồi từ Apps Script' };
@@ -1839,6 +2115,6 @@ export class GoogleSheetsService {
 // Tự động lắng nghe mọi thay đổi trên LMS Storage và kích hoạt đồng bộ nền lên Google Sheet
 // Người dùng không cần phải bấm nút đồng bộ thủ công
 onStorageChange((entity) => {
-  GoogleSheetsService.triggerAutoSync(entity === 'assignments' ? 'tests' : entity);
+  GoogleSheetsService.triggerAutoSync(entity as any);
 });
 

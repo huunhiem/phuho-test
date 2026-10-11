@@ -40,6 +40,7 @@ const STORAGE_KEYS = {
   LESSONS: 'phuho_lms_lessons',
   QUESTIONS: 'phuho_lms_questions',
   DELETED_QUESTION_IDS: 'phuho_lms_deleted_question_ids',
+  DELETED_USER_IDS: 'phuho_lms_deleted_user_ids',
   TESTS: 'phuho_lms_tests',
   ASSIGNMENTS: 'phuho_lms_assignments',
   SUBMISSIONS: 'phuho_lms_submissions',
@@ -182,7 +183,20 @@ export class LMSStorageService {
 
   // Classes
   static getClasses(): ClassRoom[] {
-    return getStored<ClassRoom[]>(STORAGE_KEYS.CLASSES, INITIAL_CLASSES);
+    const stored = getStored<ClassRoom[]>(STORAGE_KEYS.CLASSES, INITIAL_CLASSES);
+    const existingIds = new Set(stored.map((c) => c.id));
+    let hasMissing = false;
+    const merged = [...stored];
+    INITIAL_CLASSES.forEach((initCls) => {
+      if (!existingIds.has(initCls.id)) {
+        merged.push(initCls);
+        hasMissing = true;
+      }
+    });
+    if (hasMissing) {
+      setStored(STORAGE_KEYS.CLASSES, merged);
+    }
+    return merged;
   }
 
   static addClass(cls: ClassRoom): void {
@@ -213,13 +227,42 @@ export class LMSStorageService {
     notifyChange('classes');
   }
 
+  // Deleted user IDs helper
+  static getDeletedUserIds(): Set<string> {
+    const list = getStored<string[]>(STORAGE_KEYS.DELETED_USER_IDS, []);
+    return new Set(list);
+  }
+
   // Users
   static getUsers(): User[] {
-    return getStored<User[]>(STORAGE_KEYS.USERS, INITIAL_USERS);
+    const deletedIds = this.getDeletedUserIds();
+    const stored = getStored<User[]>(STORAGE_KEYS.USERS, INITIAL_USERS);
+    // Filter out any explicitly deleted users
+    const filteredStored = stored.filter((u) => !deletedIds.has(u.id) && u.status !== 'DELETED');
+    const existingIds = new Set(filteredStored.map((u) => u.id));
+    let hasMissing = false;
+    const merged = [...filteredStored];
+
+    INITIAL_USERS.forEach((initUser) => {
+      if (!existingIds.has(initUser.id) && !deletedIds.has(initUser.id)) {
+        merged.push(initUser);
+        hasMissing = true;
+      }
+    });
+
+    if (hasMissing || filteredStored.length !== stored.length) {
+      setStored(STORAGE_KEYS.USERS, merged);
+    }
+    return merged;
   }
 
   static addUser(user: User): void {
-    const list = this.getUsers();
+    // If re-adding previously deleted ID, remove from deleted IDs
+    const deletedList = getStored<string[]>(STORAGE_KEYS.DELETED_USER_IDS, []);
+    if (deletedList.includes(user.id)) {
+      setStored(STORAGE_KEYS.DELETED_USER_IDS, deletedList.filter((id) => id !== user.id));
+    }
+    const list = this.getUsers().filter((u) => u.id !== user.id && u.username.toLowerCase() !== user.username.toLowerCase());
     setStored(STORAGE_KEYS.USERS, [user, ...list]);
     notifyChange('users');
   }
@@ -235,14 +278,38 @@ export class LMSStorageService {
   }
 
   static deleteUser(id: string): void {
+    // Lưu vào danh sách đã xóa để không bao giờ bị khôi phục lại
+    const deletedList = getStored<string[]>(STORAGE_KEYS.DELETED_USER_IDS, []);
+    if (!deletedList.includes(id)) {
+      setStored(STORAGE_KEYS.DELETED_USER_IDS, [...deletedList, id]);
+    }
+
+    const targetUser = this.getUsers().find((u) => u.id === id);
+    const targetStudentCode = targetUser?.studentCode;
+
     const list = this.getUsers().filter((u) => u.id !== id);
     setStored(STORAGE_KEYS.USERS, list);
+
+    // Xóa điểm / bài nộp của tài khoản đã xóa khỏi Bảng điểm
+    const subs = this.getSubmissions().filter((s) => s.studentId !== id && (!targetStudentCode || s.studentCode !== targetStudentCode));
+    setStored(STORAGE_KEYS.SUBMISSIONS, subs);
+
     notifyChange('users');
+    notifyChange('submissions');
   }
 
   static importStudents(newStudents: User[]): void {
+    const deletedIds = this.getDeletedUserIds();
     const existing = this.getUsers();
-    const updated = [...newStudents, ...existing];
+    const userMap = new Map<string, User>();
+    existing.forEach((u) => userMap.set(u.id, u));
+    newStudents.forEach((u) => {
+      // If newly imported, ensure it is unflagged from deleted IDs
+      deletedIds.delete(u.id);
+      userMap.set(u.id, u);
+    });
+    setStored(STORAGE_KEYS.DELETED_USER_IDS, Array.from(deletedIds));
+    const updated = Array.from(userMap.values());
     setStored(STORAGE_KEYS.USERS, updated);
     notifyChange('users');
   }
@@ -514,7 +581,24 @@ export class LMSStorageService {
 
   // Submissions
   static getSubmissions(): Submission[] {
-    return getStored<Submission[]>(STORAGE_KEYS.SUBMISSIONS, INITIAL_SUBMISSIONS);
+    const rawSubs = getStored<Submission[]>(STORAGE_KEYS.SUBMISSIONS, INITIAL_SUBMISSIONS);
+    const deletedIds = this.getDeletedUserIds();
+    const activeUsers = this.getUsers().filter((u) => u.status !== 'DELETED');
+    const activeUserIds = new Set(activeUsers.map((u) => u.id));
+    const activeStudentCodes = new Set(activeUsers.map((u) => u.studentCode).filter(Boolean));
+
+    // Lọc bỏ triệt để các bài nộp của tài khoản đã xóa, chỉ lưu và đọc kết quả tài khoản còn hoạt động
+    const filtered = rawSubs.filter((s) => {
+      if (deletedIds.has(s.studentId)) return false;
+      if (s.studentCode && activeStudentCodes.has(s.studentCode)) return true;
+      if (activeUserIds.has(s.studentId)) return true;
+      return false;
+    });
+
+    if (filtered.length !== rawSubs.length) {
+      setStored(STORAGE_KEYS.SUBMISSIONS, filtered);
+    }
+    return filtered;
   }
 
   static addSubmission(sub: Submission): void {
@@ -879,9 +963,9 @@ export class LMSStorageService {
       return true;
     });
 
-    // Lấy danh sách học sinh thuộc các lớp được giao
+    // Lấy danh sách học sinh thuộc các lớp được giao (chỉ lấy học sinh còn hoạt động)
     const studentUsers = allUsers.filter((u) => {
-      if (u.role !== 'STUDENT') return false;
+      if (u.role !== 'STUDENT' || u.status === 'DELETED') return false;
       if (targetClassIds.length > 0) {
         return targetClassIds.includes(u.classId || '');
       }

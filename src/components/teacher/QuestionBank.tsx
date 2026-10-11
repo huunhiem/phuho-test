@@ -1300,30 +1300,37 @@ export const QuestionBank: React.FC<QuestionBankProps> = ({ currentUser }) => {
                         </div>
                       )}
                       {formData.imageDriveUrl ? (
-                        <a
-                          href={formData.imageDriveUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 text-[11px] text-blue-600 hover:underline font-mono"
-                        >
-                          <ExternalLink className="w-3 h-3" />
-                          <span>Mở link Google Drive</span>
-                        </a>
-                      ) : currentUser.role === 'ADMIN' ? (
+                        <div className="flex flex-wrap items-center gap-2">
+                          <a
+                            href={formData.imageDriveUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-[11px] text-blue-600 hover:underline font-mono"
+                          >
+                            <ExternalLink className="w-3 h-3" />
+                            <span>Mở ảnh trên Google Drive</span>
+                          </a>
+                          <span className="text-slate-300">·</span>
+                          <a
+                            href="https://drive.google.com/drive/folders/1hpLRzYT60uGtV1DcqaRnAlTBA3q5w1Nc?usp=sharing"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-[11px] text-emerald-700 hover:underline"
+                          >
+                            <span>Thư mục Drive câu hỏi</span>
+                          </a>
+                        </div>
+                      ) : (
                         <button
                           type="button"
                           disabled={isUploadingImage}
                           onClick={handleConnectGoogleAndUploadImage}
-                          className="mt-1 inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-semibold rounded-md text-[11px] shadow-xs cursor-pointer transition-colors"
+                          className="mt-1 inline-flex items-center gap-1.5 px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded-md text-[11px] shadow-xs cursor-pointer transition-colors"
                           title="Đăng nhập Google và tải hình ảnh này lên Google Drive"
                         >
                           <Key className="w-3 h-3" />
-                          <span>{isUploadingImage ? 'Đang tải lên Drive...' : 'Đăng nhập Google Drive để tải ảnh lên đám mây'}</span>
+                          <span>{isUploadingImage ? 'Đang tải lên Drive...' : 'Đăng nhập Google Drive để tải ảnh lên thư mục nhà trường'}</span>
                         </button>
-                      ) : (
-                        <div className="text-[11px] text-emerald-700 font-medium pt-0.5">
-                          ✓ Ảnh được tự động lưu trữ và đồng bộ theo cấu hình của Quản trị viên
-                        </div>
                       )}
                     </div>
                   </div>

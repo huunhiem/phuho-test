@@ -14,10 +14,12 @@ import {
   UserX,
   AlertTriangle,
   ArrowRight,
-  Search
+  Search,
+  Edit2
 } from 'lucide-react';
 import { Assignment, Test, User, ClassRoom } from '../../types';
 import { LMSStorageService } from '../../services/storage';
+import { GoogleSheetsService } from '../../services/googleSheetsService';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 
 interface AssignmentManagerProps {
@@ -25,11 +27,28 @@ interface AssignmentManagerProps {
 }
 
 export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUser }) => {
+  const isPrivileged = currentUser.role === 'ADMIN' || currentUser.role === 'PRINCIPAL';
+  const allClasses = LMSStorageService.getClasses();
+  const classes = isPrivileged
+    ? allClasses
+    : allClasses.filter((c) => currentUser.assignedClassIds?.includes(c.id));
+
+  const allTests = LMSStorageService.getTests();
+  // Giáo viên chỉ thấy các đề thi do chính mình tạo ra
+  const tests = isPrivileged
+    ? allTests
+    : allTests.filter((t) => t.createdBy === currentUser.id);
+
   const [assignments, setAssignments] = useState<Assignment[]>(() => LMSStorageService.getAssignments());
-  const [tests] = useState<Test[]>(() => LMSStorageService.getTests());
-  const [classes] = useState<ClassRoom[]>(() => LMSStorageService.getClasses());
+
+  // Giáo viên chỉ thấy các đợt kiểm tra do chính mình giao
+  const visibleAssignments = isPrivileged
+    ? assignments
+    : assignments.filter((a) => a.assignedBy === currentUser.id);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingAssign, setEditingAssign] = useState<Assignment | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [deleteAssignId, setDeleteAssignId] = useState<string | null>(null);
 
   // Modal xem kết quả từng đề thi & học sinh tham gia / chưa tham gia
@@ -39,7 +58,7 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
 
   const [formData, setFormData] = useState({
     testId: tests[0]?.id || '',
-    selectedClassIds: ['cls-6-1'],
+    selectedClassIds: classes[0]?.id ? [classes[0].id] : ['cls-6-1'],
     startTime: new Date().toISOString().slice(0, 16),
     endTime: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 16),
     password: '',
@@ -52,9 +71,10 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
   };
 
   const handleOpenAdd = () => {
+    setEditingAssign(null);
     setFormData({
       testId: tests[0]?.id || '',
-      selectedClassIds: [classes[0]?.id || 'cls-6-1'],
+      selectedClassIds: classes[0]?.id ? [classes[0].id] : ['cls-6-1'],
       startTime: new Date().toISOString().slice(0, 16),
       endTime: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 16),
       password: '',
@@ -64,14 +84,57 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
     setIsModalOpen(true);
   };
 
+  const handleOpenEdit = (assign: Assignment) => {
+    setEditingAssign(assign);
+    setFormData({
+      testId: assign.testId,
+      selectedClassIds: assign.classIds,
+      startTime: assign.startTime ? new Date(assign.startTime).toISOString().slice(0, 16) : new Date().toISOString().slice(0, 16),
+      endTime: assign.endTime ? new Date(assign.endTime).toISOString().slice(0, 16) : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 16),
+      password: assign.password || '',
+      allowReviewAfterSubmit: assign.allowReviewAfterSubmit ?? true,
+      shuffleQuestions: assign.shuffleQuestions ?? true
+    });
+    setIsModalOpen(true);
+  };
+
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
-    const test = tests.find((t) => t.id === formData.testId);
+    const test = tests.find((t) => t.id === formData.testId) || allTests.find((t) => t.id === formData.testId);
     if (!test || formData.selectedClassIds.length === 0) return;
 
-    const classNames = classes
+    const classNames = allClasses
       .filter((c) => formData.selectedClassIds.includes(c.id))
       .map((c) => c.name);
+
+    if (editingAssign) {
+      const updatedAssignment: Assignment = {
+        ...editingAssign,
+        testId: test.id,
+        testTitle: test.title,
+        gradeLevel: test.gradeLevel,
+        classIds: formData.selectedClassIds,
+        classNames,
+        startTime: formData.startTime,
+        endTime: formData.endTime,
+        password: formData.password || undefined,
+        allowReviewAfterSubmit: formData.allowReviewAfterSubmit,
+        shuffleQuestions: formData.shuffleQuestions
+      };
+
+      LMSStorageService.updateAssignment(updatedAssignment);
+      GoogleSheetsService.triggerAutoSync('assignments');
+      GoogleSheetsService.postToAppsScript({
+        action: 'saveAssignment',
+        ...updatedAssignment
+      }).catch((e) => console.warn('Lỗi ghi saveAssignment Apps Script:', e));
+      refreshAssignments();
+      setIsModalOpen(false);
+      setEditingAssign(null);
+      setToastMessage('✓ Đã cập nhật đợt giao đề thành công và tự động đồng bộ vào Google Sheet (sheet GiaoDe)!');
+      setTimeout(() => setToastMessage(null), 4000);
+      return;
+    }
 
     const newAssignment: Assignment = {
       id: `assign-${Date.now()}`,
@@ -92,8 +155,15 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
     };
 
     LMSStorageService.addAssignment(newAssignment);
+    GoogleSheetsService.triggerAutoSync('assignments');
+    GoogleSheetsService.postToAppsScript({
+      action: 'saveAssignment',
+      ...newAssignment
+    }).catch((e) => console.warn('Lỗi ghi saveAssignment Apps Script:', e));
     refreshAssignments();
     setIsModalOpen(false);
+    setToastMessage('✓ Đã giao bài kiểm tra thành công và tự động đồng bộ vào Google Sheet (sheet GiaoDe)!');
+    setTimeout(() => setToastMessage(null), 4000);
   };
 
   const handleDelete = (id: string) => {
@@ -102,25 +172,50 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
 
   const confirmDeleteAssignment = () => {
     if (deleteAssignId) {
-      LMSStorageService.deleteAssignment(deleteAssignId);
+      const idToDelete = deleteAssignId;
+      LMSStorageService.deleteAssignment(idToDelete);
+      GoogleSheetsService.triggerAutoSync('assignments');
+      GoogleSheetsService.postToAppsScript({
+        action: 'deleteAssignment',
+        id: idToDelete
+      }).catch((e) => console.warn('Lỗi xóa deleteAssignment Apps Script:', e));
       refreshAssignments();
       setDeleteAssignId(null);
+      setToastMessage('✓ Đã xóa đợt giao đề và tự động cập nhật Google Sheet (sheet GiaoDe)!');
+      setTimeout(() => setToastMessage(null), 4000);
     }
   };
 
   return (
     <div className="space-y-6">
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-900 text-xs font-semibold flex items-center justify-between shadow-xs animate-in fade-in">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>{toastMessage}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setToastMessage(null)}
+            className="text-emerald-700 hover:text-emerald-900 text-sm font-bold ml-2"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Giao bài kiểm tra cho Lớp</h1>
           <p className="text-sm text-slate-500 mt-1">
-            Lên lịch thi trực tuyến, đặt hạn nộp bài và chỉ định các lớp làm bài kiểm tra Tin học
+            Lên lịch thi trực tuyến, đặt hạn nộp bài và chỉ định các lớp làm bài kiểm tra Tin học (Tự động lưu vào Google Sheet)
           </p>
         </div>
         <button
           type="button"
           onClick={handleOpenAdd}
-          className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-xs transition-colors self-start"
+          className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-xs transition-colors self-start cursor-pointer"
         >
           <Send className="w-4 h-4" />
           <span>Giao bài mới</span>
@@ -129,12 +224,12 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
 
       {/* Assignment List */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {assignments.length === 0 ? (
+        {visibleAssignments.length === 0 ? (
           <div className="col-span-full p-8 text-center bg-white rounded-xl border border-slate-200 text-slate-400 text-xs">
             Chưa có đợt kiểm tra nào được giao. Bấm "Giao bài mới" để bắt đầu.
           </div>
         ) : (
-          assignments.map((item) => (
+          visibleAssignments.map((item) => (
             <div key={item.id} className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs space-y-4">
               <div className="flex items-start justify-between gap-2">
                 <div>
@@ -148,14 +243,24 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
                   <h3 className="font-bold text-slate-900 text-sm">{item.testTitle}</h3>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => handleDelete(item.id)}
-                  className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded"
-                  title="Hủy giao bài"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => handleOpenEdit(item)}
+                    className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors cursor-pointer"
+                    title="Chỉnh sửa đợt giao bài"
+                  >
+                    <Edit2 className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDelete(item.id)}
+                    className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded transition-colors cursor-pointer"
+                    title="Hủy giao bài"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
 
               <div className="space-y-2 text-xs border-t border-slate-100 pt-3 text-slate-600">
@@ -502,7 +607,9 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4">
           <div className="bg-white rounded-xl shadow-xl border border-slate-200 w-full max-w-md p-6 animate-in fade-in zoom-in-95">
-            <h2 className="text-base font-bold text-slate-900 mb-4">Giao bài kiểm tra mới cho lớp</h2>
+            <h2 className="text-base font-bold text-slate-900 mb-4">
+              {editingAssign ? 'Chỉnh sửa & Thay đổi đợt giao bài (Đồng bộ Google Sheet)' : 'Giao bài kiểm tra mới cho lớp (Đồng bộ Google Sheet)'}
+            </h2>
 
             <form onSubmit={handleSave} className="space-y-3.5 text-xs">
               <div>
@@ -611,16 +718,19 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
               <div className="flex items-center justify-end gap-2 pt-4 border-t border-slate-100">
                 <button
                   type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  className="px-3.5 py-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                  onClick={() => {
+                    setIsModalOpen(false);
+                    setEditingAssign(null);
+                  }}
+                  className="px-3.5 py-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
                 >
                   Hủy
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-xs transition-colors"
+                  className="px-4 py-2 font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-xs transition-colors cursor-pointer"
                 >
-                  Xác nhận giao bài
+                  {editingAssign ? 'Cập nhật & Đồng bộ Google Sheet' : 'Xác nhận giao bài'}
                 </button>
               </div>
             </form>

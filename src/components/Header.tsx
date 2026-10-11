@@ -13,11 +13,14 @@ import {
   ChevronDown,
   CheckCircle2,
   RefreshCw,
-  Zap
+  Zap,
+  User as UserIcon,
+  Settings
 } from 'lucide-react';
 import { User, UserRole } from '../types';
 import { LMSStorageService } from '../services/storage';
 import { ConfirmDialog } from './common/ConfirmDialog';
+import { AccountProfileModal } from './profile/AccountProfileModal';
 import {
   subscribeAutoSyncStatus,
   AutoSyncState,
@@ -81,6 +84,7 @@ interface HeaderProps {
   currentUser: User;
   onResetData: () => void;
   onLogout?: () => void;
+  onUserUpdated?: (user: User) => void;
   mobileMenuOpen: boolean;
   setMobileMenuOpen: (open: boolean) => void;
 }
@@ -89,11 +93,13 @@ export const Header: React.FC<HeaderProps> = ({
   currentUser,
   onResetData,
   onLogout,
+  onUserUpdated,
   mobileMenuOpen,
   setMobileMenuOpen
 }) => {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Auto-sync status tracking
@@ -331,6 +337,21 @@ export const Header: React.FC<HeaderProps> = ({
 
                   {/* Bottom Actions */}
                   <div className="pt-2 px-3 space-y-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDropdownOpen(false);
+                        setIsProfileModalOpen(true);
+                      }}
+                      className="w-full flex items-center justify-between px-3 py-2 text-xs text-indigo-700 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer font-semibold"
+                    >
+                      <div className="flex items-center gap-2">
+                        <UserIcon className="w-3.5 h-3.5 text-indigo-600" />
+                        <span>Thay đổi thông tin tài khoản</span>
+                      </div>
+                      <span className="text-[10px] text-indigo-400 font-normal">Hồ sơ / Mật khẩu</span>
+                    </button>
+
                     {currentUser.role === 'ADMIN' && (
                       <button
                         type="button"
@@ -368,6 +389,16 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Account Profile Modal (Thay đổi thông tin tài khoản, đổi mật khẩu) */}
+      <AccountProfileModal
+        isOpen={isProfileModalOpen}
+        onClose={() => setIsProfileModalOpen(false)}
+        currentUser={currentUser}
+        onUserUpdated={(updatedUser) => {
+          onUserUpdated?.(updatedUser);
+        }}
+      />
 
       {/* Reset Confirmation Dialog (Dành cho Quản trị viên) */}
       <ConfirmDialog

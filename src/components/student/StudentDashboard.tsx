@@ -8,11 +8,14 @@ import {
   ArrowRight,
   History,
   AlertCircle,
-  FileText
+  FileText,
+  User as UserIcon,
+  Key
 } from 'lucide-react';
 import { User, Assignment, Submission } from '../../types';
 import { LMSStorageService } from '../../services/storage';
 import { ExamRoom } from './ExamRoom';
+import { AccountProfileModal } from '../profile/AccountProfileModal';
 
 interface StudentDashboardProps {
   currentUser: User;
@@ -22,11 +25,17 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser 
   const [assignments, setAssignments] = useState(() => LMSStorageService.getAssignments());
   const [submissions, setSubmissions] = useState(() => LMSStorageService.getSubmissions());
   const [activeExam, setActiveExam] = useState<Assignment | null>(null);
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
 
   const refreshData = () => {
     setAssignments(LMSStorageService.getAssignments());
     setSubmissions(LMSStorageService.getSubmissions());
   };
+
+  const classes = LMSStorageService.getClasses();
+  const studentClass = currentUser.classId
+    ? (classes.find((c) => c.id === currentUser.classId)?.name || currentUser.classId.replace('cls-', '').replace('-', '/'))
+    : '8/7';
 
   // Submissions made by this student
   const studentSubs = submissions.filter((s) => s.studentId === currentUser.id);
@@ -68,7 +77,7 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser 
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/10 text-white/90 text-xs font-semibold mb-2 backdrop-blur-xs">
-              <span>Học sinh Lớp 6/1</span>
+              <span>Học sinh Lớp {studentClass}</span>
               <span>·</span>
               <span>Trường THCS Phú Hồ</span>
             </div>
@@ -76,6 +85,16 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser 
             <p className="text-sky-100 text-xs mt-1">
               Mã học sinh: <strong>{currentUser.studentCode}</strong> · Chúc em làm bài kiểm tra Tin học thật tốt và đạt kết quả cao!
             </p>
+            <div className="mt-3">
+              <button
+                type="button"
+                onClick={() => setIsProfileOpen(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/20 hover:bg-white/30 text-white text-xs font-semibold backdrop-blur-xs transition-colors cursor-pointer border border-white/20"
+              >
+                <UserIcon className="w-3.5 h-3.5" />
+                <span>Thay đổi thông tin / Đổi mật khẩu</span>
+              </button>
+            </div>
           </div>
 
           <div className="p-3 bg-white/10 rounded-xl backdrop-blur-xs text-center border border-white/20">
@@ -85,6 +104,16 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser 
           </div>
         </div>
       </div>
+
+      {/* Account Profile Modal */}
+      <AccountProfileModal
+        isOpen={isProfileOpen}
+        onClose={() => setIsProfileOpen(false)}
+        currentUser={currentUser}
+        onUserUpdated={() => {
+          refreshData();
+        }}
+      />
 
       {/* Assigned Tests section */}
       <div className="space-y-4">

@@ -27,7 +27,10 @@ import {
   UserX,
   FileSpreadsheet,
   Clock,
-  AlertTriangle
+  AlertTriangle,
+  ImageIcon,
+  ExternalLink,
+  Edit2
 } from 'lucide-react';
 import {
   Test,
@@ -41,6 +44,8 @@ import {
   MatrixCellConfig
 } from '../../types';
 import { LMSStorageService } from '../../services/storage';
+import { GoogleDriveService } from '../../services/googleDriveService';
+import { GoogleSheetsService } from '../../services/googleSheetsService';
 import { onStorageChange } from '../../services/storageEvents';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 
@@ -312,9 +317,13 @@ export const MATRIX_PRESETS = [
 ];
 
 export const TestBuilder: React.FC<TestBuilderProps> = ({ currentUser, onTestCreated }) => {
+  const isPrivileged = currentUser.role === 'ADMIN' || currentUser.role === 'SUPER_ADMIN' || currentUser.role === 'PRINCIPAL';
   const [tests, setTests] = useState<Test[]>(() => LMSStorageService.getTests());
   const [questions, setQuestions] = useState<Question[]>(() => LMSStorageService.getQuestions());
   const [lessons, setLessons] = useState(() => LMSStorageService.getLessons());
+
+  // Giáo viên nào tạo đề thi thì chỉ hiển thị ở tài khoản giáo viên đó
+  const visibleTests = isPrivileged ? tests : tests.filter((t) => t.createdBy === currentUser.id);
 
   useEffect(() => {
     const unsub = onStorageChange((entity) => {
@@ -333,6 +342,8 @@ export const TestBuilder: React.FC<TestBuilderProps> = ({ currentUser, onTestCre
 
   // Form State for creating new test
   const [isCreating, setIsCreating] = useState(false);
+  const [editingTest, setEditingTest] = useState<Test | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [previewTest, setPreviewTest] = useState<Test | null>(null);
   const [deleteTestId, setDeleteTestId] = useState<string | null>(null);
   const [validationError, setValidationError] = useState<string>('');
@@ -797,6 +808,44 @@ export const TestBuilder: React.FC<TestBuilderProps> = ({ currentUser, onTestCre
 
     const finalTotalPoints = Math.round(actualSelectedPoints * 100) / 100 || matrixSummary.totalPoints || 10;
 
+    if (editingTest) {
+      const updatedTest: Test = {
+        ...editingTest,
+        title: testForm.title,
+        gradeLevel: Number(testForm.gradeLevel),
+        durationMinutes: Number(testForm.durationMinutes),
+        totalQuestions: selectedQuestionIds.length,
+        totalPoints: finalTotalPoints,
+        matrix: {
+          knowCount,
+          understandCount,
+          applyCount,
+          selectedTopics: testForm.selectedTopics,
+          selectedLessons: lessonSelectionMode === 'CUSTOM' && selectedLessons.length > 0 ? selectedLessons : undefined,
+          grid: matrixGrid,
+          difficultyPoints,
+          typePoints,
+          questionPointsMap
+        },
+        questionIds: selectedQuestionIds,
+        questionPoints: questionPointsMap,
+        variants
+      };
+
+      LMSStorageService.updateTest(updatedTest);
+      GoogleSheetsService.triggerAutoSync('tests');
+      GoogleSheetsService.postToAppsScript({
+        action: 'saveTest',
+        ...updatedTest
+      }).catch((e) => console.warn('Lỗi ghi saveTest Apps Script:', e));
+      refreshTests();
+      setIsCreating(false);
+      setEditingTest(null);
+      setToastMessage('✓ Đã cập nhật đề thi thành công và tự động đồng bộ vào Google Sheet (sheet DeThi)!');
+      setTimeout(() => setToastMessage(null), 4000);
+      return;
+    }
+
     const newTest: Test = {
       id: `test-${Date.now()}`,
       title: testForm.title,
@@ -825,9 +874,42 @@ export const TestBuilder: React.FC<TestBuilderProps> = ({ currentUser, onTestCre
     };
 
     LMSStorageService.addTest(newTest);
+    GoogleSheetsService.triggerAutoSync('tests');
+    GoogleSheetsService.postToAppsScript({
+      action: 'saveTest',
+      ...newTest
+    }).catch((e) => console.warn('Lỗi ghi saveTest Apps Script:', e));
     refreshTests();
     setIsCreating(false);
+    setToastMessage('✓ Đã tạo đề thi mới thành công và tự động đồng bộ vào Google Sheet (sheet DeThi)!');
+    setTimeout(() => setToastMessage(null), 4000);
     if (onTestCreated) onTestCreated(newTest);
+  };
+
+  const handleOpenEditTest = (test: Test) => {
+    setEditingTest(test);
+    setTestForm({
+      title: test.title,
+      gradeLevel: test.gradeLevel,
+      durationMinutes: test.durationMinutes,
+      selectedTopics: test.matrix?.selectedTopics || ['Chủ đề A: Máy tính và cộng đồng'],
+      variantCount: test.variants?.length || 2
+    });
+    setSelectedQuestionIds(test.questionIds || []);
+    if (test.matrix?.selectedLessons && test.matrix.selectedLessons.length > 0) {
+      setLessonSelectionMode('CUSTOM');
+      setSelectedLessons(test.matrix.selectedLessons);
+    } else {
+      setLessonSelectionMode('ALL');
+      setSelectedLessons([]);
+    }
+    if (test.matrix?.grid) {
+      setMatrixGrid(test.matrix.grid);
+    }
+    if (test.questionPoints) {
+      setQuestionPointsMap(test.questionPoints);
+    }
+    setIsCreating(true);
   };
 
   const handleDeleteTest = (id: string) => {
@@ -836,9 +918,17 @@ export const TestBuilder: React.FC<TestBuilderProps> = ({ currentUser, onTestCre
 
   const confirmDeleteTest = () => {
     if (deleteTestId) {
-      LMSStorageService.deleteTest(deleteTestId);
+      const idToDelete = deleteTestId;
+      LMSStorageService.deleteTest(idToDelete);
+      GoogleSheetsService.triggerAutoSync('tests');
+      GoogleSheetsService.postToAppsScript({
+        action: 'deleteTest',
+        id: idToDelete
+      }).catch((e) => console.warn('Lỗi xóa deleteTest Apps Script:', e));
       refreshTests();
       setDeleteTestId(null);
+      setToastMessage('✓ Đã xóa đề thi và tự động cập nhật Google Sheet (sheet DeThi)!');
+      setTimeout(() => setToastMessage(null), 4000);
     }
   };
 
@@ -859,6 +949,23 @@ export const TestBuilder: React.FC<TestBuilderProps> = ({ currentUser, onTestCre
 
   return (
     <div className="space-y-6">
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-900 text-xs font-semibold flex items-center justify-between shadow-xs animate-in fade-in">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>{toastMessage}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setToastMessage(null)}
+            className="text-emerald-700 hover:text-emerald-900 text-sm font-bold ml-2"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -867,13 +974,14 @@ export const TestBuilder: React.FC<TestBuilderProps> = ({ currentUser, onTestCre
             <span>Tạo & Quản lý Đề kiểm tra</span>
           </h1>
           <p className="text-sm text-slate-500 mt-1">
-            Thiết lập ma trận 2 chiều chuẩn GDPT 2018: số câu, số điểm theo Mức độ nhận thức và Dạng câu hỏi
+            Thiết lập ma trận 2 chiều chuẩn GDPT 2018: số câu, số điểm theo Mức độ nhận thức và Dạng câu hỏi (Lưu tự động vào Google Sheet)
           </p>
         </div>
         {!isCreating && (
           <button
             type="button"
             onClick={() => {
+              setEditingTest(null);
               setIsCreating(true);
               setAutoPickMessage('');
               setShortfallWarning('');
@@ -888,17 +996,24 @@ export const TestBuilder: React.FC<TestBuilderProps> = ({ currentUser, onTestCre
         )}
       </div>
 
-      {/* Test Creation Form */}
+      {/* Test Creation / Editing Form */}
       {isCreating ? (
         <div className="bg-white rounded-2xl border border-slate-200 p-6 sm:p-7 shadow-xs space-y-7">
           <div className="flex items-center justify-between border-b border-slate-100 pb-4">
             <h2 className="text-base font-bold text-slate-900 flex items-center gap-2.5">
               <Table className="w-5 h-5 text-indigo-600" />
-              <span>Thiết lập Ma trận đề thi & Phân bổ điểm chi tiết</span>
+              <span>
+                {editingTest
+                  ? `Chỉnh sửa & Thay đổi Đề thi: ${editingTest.title} (Đồng bộ Google Sheet)`
+                  : 'Thiết lập Ma trận đề thi & Phân bổ điểm chi tiết (Lưu vào Google Sheet)'}
+              </span>
             </h2>
             <button
               type="button"
-              onClick={() => setIsCreating(false)}
+              onClick={() => {
+                setIsCreating(false);
+                setEditingTest(null);
+              }}
               className="px-3 py-1.5 text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg cursor-pointer transition-colors"
             >
               Hủy bỏ
@@ -1556,6 +1671,38 @@ export const TestBuilder: React.FC<TestBuilderProps> = ({ currentUser, onTestCre
                               <p className="font-medium text-slate-800 line-clamp-2 leading-relaxed">
                                 {q.content}
                               </p>
+
+                              {(q.imageUrl || q.imageDriveUrl) && (
+                                <div className="mt-2 flex items-center gap-2">
+                                  <img
+                                    src={GoogleDriveService.getDriveDirectImageUrl(q.imageUrl || q.imageDriveUrl || '')}
+                                    alt="Ảnh câu hỏi"
+                                    className="max-h-16 max-w-28 rounded object-contain border border-slate-200 bg-white"
+                                    onError={(e) => {
+                                      if (q.imageDriveUrl && e.currentTarget.src !== q.imageDriveUrl) {
+                                        e.currentTarget.src = q.imageDriveUrl;
+                                      }
+                                    }}
+                                  />
+                                  <div className="text-[11px] space-y-0.5">
+                                    <span className="flex items-center gap-1 text-slate-500 font-medium">
+                                      <ImageIcon className="w-3 h-3 text-indigo-500" />
+                                      <span>Ảnh minh họa</span>
+                                    </span>
+                                    {q.imageDriveUrl && (
+                                      <a
+                                        href={q.imageDriveUrl}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-blue-600 hover:underline flex items-center gap-0.5 font-mono text-[10px]"
+                                      >
+                                        <ExternalLink className="w-2.5 h-2.5" />
+                                        <span>Drive</span>
+                                      </a>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           </div>
 
@@ -1621,7 +1768,10 @@ export const TestBuilder: React.FC<TestBuilderProps> = ({ currentUser, onTestCre
               <div className="flex items-center gap-3 ml-auto">
                 <button
                   type="button"
-                  onClick={() => setIsCreating(false)}
+                  onClick={() => {
+                    setIsCreating(false);
+                    setEditingTest(null);
+                  }}
                   className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer font-medium"
                 >
                   Hủy bỏ
@@ -1631,7 +1781,9 @@ export const TestBuilder: React.FC<TestBuilderProps> = ({ currentUser, onTestCre
                   className="px-5 py-2.5 font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-2"
                 >
                   <Check className="w-4 h-4" />
-                  <span>Lưu & Hoàn tất Đề thi ({selectedQuestionIds.length} câu)</span>
+                  <span>
+                    {editingTest ? 'Cập nhật & Đồng bộ Google Sheet' : 'Lưu & Hoàn tất Đề thi'} ({selectedQuestionIds.length} câu)
+                  </span>
                 </button>
               </div>
             </div>
@@ -1640,14 +1792,14 @@ export const TestBuilder: React.FC<TestBuilderProps> = ({ currentUser, onTestCre
       ) : (
         /* Test List Cards */
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {tests.length === 0 ? (
+          {visibleTests.length === 0 ? (
             <div className="col-span-full p-12 text-center bg-white rounded-2xl border border-slate-200 text-slate-400 text-xs space-y-3">
               <Layers className="w-10 h-10 mx-auto text-slate-300" />
               <div className="font-semibold text-slate-600 text-sm">Chưa có đề kiểm tra nào được tạo</div>
               <div>Bấm nút "Tạo đề thi mới theo Ma trận" ở góc trên để bắt đầu soạn đề.</div>
             </div>
           ) : (
-            tests.map((test) => {
+            visibleTests.map((test) => {
               const knowCount = test.matrix?.knowCount ?? 0;
               const understandCount = test.matrix?.understandCount ?? 0;
               const applyCount = test.matrix?.applyCount ?? 0;
@@ -1671,6 +1823,14 @@ export const TestBuilder: React.FC<TestBuilderProps> = ({ currentUser, onTestCre
                     </div>
 
                     <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenEditTest(test)}
+                        className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer"
+                        title="Sửa / Thay đổi đề thi"
+                      >
+                        <Edit2 className="w-4 h-4" />
+                      </button>
                       <button
                         type="button"
                         onClick={() => setPreviewTest(test)}
@@ -1903,6 +2063,12 @@ export const TestBuilder: React.FC<TestBuilderProps> = ({ currentUser, onTestCre
                               {q.lessonTitle}
                             </span>
                           )}
+                          {(q.imageUrl || q.imageDriveUrl) && (
+                            <span className="text-[10px] bg-sky-50 text-sky-700 border border-sky-200 px-1.5 py-0.2 rounded font-medium inline-flex items-center gap-0.5">
+                              <ImageIcon className="w-2.5 h-2.5 text-sky-600" />
+                              <span>Có ảnh</span>
+                            </span>
+                          )}
                           <span className="text-[10px] text-slate-400 truncate">
                             {q.topic}
                           </span>
@@ -2084,6 +2250,38 @@ export const TestBuilder: React.FC<TestBuilderProps> = ({ currentUser, onTestCre
                       </div>
 
                       <div className="text-slate-800 font-medium leading-relaxed">{q.content}</div>
+
+                      {(q.imageUrl || q.imageDriveUrl) && (
+                        <div className="my-2 p-2 bg-white rounded-lg border border-slate-200 inline-block">
+                          <img
+                            src={GoogleDriveService.getDriveDirectImageUrl(q.imageUrl || q.imageDriveUrl || '')}
+                            alt="Hình ảnh câu hỏi"
+                            className="max-h-52 max-w-full rounded object-contain"
+                            onError={(e) => {
+                              if (q.imageDriveUrl && e.currentTarget.src !== q.imageDriveUrl) {
+                                e.currentTarget.src = q.imageDriveUrl;
+                              }
+                            }}
+                          />
+                          {q.imageDriveUrl && (
+                            <div className="mt-1 flex items-center justify-between text-[10px] text-slate-500">
+                              <span className="flex items-center gap-1">
+                                <ImageIcon className="w-3 h-3 text-indigo-500" />
+                                <span>Ảnh đính kèm</span>
+                              </span>
+                              <a
+                                href={q.imageDriveUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-blue-600 hover:underline flex items-center gap-1 font-mono"
+                              >
+                                <ExternalLink className="w-3 h-3" />
+                                <span>Google Drive</span>
+                              </a>
+                            </div>
+                          )}
+                        </div>
+                      )}
 
                       {q.options && (
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
