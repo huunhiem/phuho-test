@@ -654,7 +654,7 @@ export class GoogleSheetsService {
 
   // --- BUILD ROW DATA HELPERS ---
 
-  private static buildTaiKhoanRows(): any[][] {
+  static buildTaiKhoanRows(): any[][] {
     const users = LMSStorageService.getUsers().filter((u) => u.status !== 'DELETED');
     const classes = LMSStorageService.getClasses();
 
@@ -708,7 +708,7 @@ export class GoogleSheetsService {
     ];
   }
 
-  private static buildHocSinhRows(): any[][] {
+  static buildHocSinhRows(): any[][] {
     const students = LMSStorageService.getUsers().filter((u) => u.role === 'STUDENT' && u.status !== 'DELETED');
     const classes = LMSStorageService.getClasses();
 
@@ -760,7 +760,7 @@ export class GoogleSheetsService {
     ];
   }
 
-  private static buildGiaoVienRows(): any[][] {
+  static buildGiaoVienRows(): any[][] {
     const staff = LMSStorageService.getUsers().filter((u) => u.role !== 'STUDENT' && u.status !== 'DELETED');
     const classes = LMSStorageService.getClasses();
 
@@ -798,7 +798,7 @@ export class GoogleSheetsService {
     ];
   }
 
-  private static buildLopHocRows(): any[][] {
+  static buildLopHocRows(): any[][] {
     const classes = LMSStorageService.getClasses();
     const users = LMSStorageService.getUsers();
     const teachers = users.filter((u) => u.role === 'TEACHER' || u.role === 'DEPARTMENT_HEAD');
@@ -1681,6 +1681,106 @@ export class GoogleSheetsService {
   }
 
   /**
+   * Lưu và đồng bộ ngay lập tức phân công giáo viên giảng dạy lên Google Sheet (sheet LopHoc và GiaoVien)
+   */
+  static async syncClassAssignments(
+    teacherId: string,
+    assignedClassIds: string[]
+  ): Promise<{ success: boolean; message: string }> {
+    const sheetId = getSavedSheetId();
+    const token = getGoogleAccessToken();
+    const scriptUrl = getAppsScriptUrl();
+    const folderId = getSavedDriveFolderId();
+
+    const users = LMSStorageService.getUsers();
+    const teacher = users.find((u) => u.id === teacherId);
+    const classes = LMSStorageService.getClasses();
+
+    let oauthOk = false;
+    let appsScriptOk = false;
+
+    // 1. Đồng bộ trực tiếp qua Google Sheet API OAuth nếu có token
+    if (sheetId && token) {
+      try {
+        await this.syncEntity('classes', sheetId, token);
+        await this.syncEntity('users', sheetId, token);
+        oauthOk = true;
+      } catch (err) {
+        console.warn('Lỗi đồng bộ phân công qua OAuth:', err);
+      }
+    }
+
+    // 2. Đồng bộ qua Apps Script Web App
+    if (scriptUrl) {
+      try {
+        const lopHocRows = this.buildLopHocRows();
+        const giaoVienRows = this.buildGiaoVienRows();
+        const taiKhoanRows = this.buildTaiKhoanRows();
+
+        const res = await this.postToAppsScript({
+          action: 'saveTeacherAssignment',
+          sheetId,
+          folderId,
+          teacherId,
+          teacherName: teacher?.fullName,
+          assignedClassIds,
+          classesRows: lopHocRows,
+          teachersRows: giaoVienRows,
+          sheets: [
+            { name: 'LopHoc', rows: lopHocRows },
+            { name: 'GiaoVien', rows: giaoVienRows },
+            { name: 'TaiKhoan', rows: taiKhoanRows }
+          ]
+        });
+
+        if (res.success) {
+          appsScriptOk = true;
+        }
+
+        // Cập nhật từng lớp bị ảnh hưởng qua action saveClass
+        for (const cls of classes) {
+          const isAffected = assignedClassIds.includes(cls.id) || cls.assignedTeacherIds?.includes(teacherId);
+          if (isAffected) {
+            const assignedTeachers = users.filter((u) =>
+              u.assignedClassIds?.includes(cls.id) ||
+              cls.assignedTeacherIds?.includes(u.id) ||
+              cls.subjectTeacherId === u.id
+            );
+            const teacherNames = assignedTeachers.map((t) => t.fullName).join(', ');
+            this.postToAppsScript({
+              action: 'saveClass',
+              sheetId,
+              id: cls.id,
+              name: cls.name,
+              grade: cls.name.split('/')[0] || '6',
+              studentCount: cls.studentCount || 35,
+              homeroomTeacherName: cls.homeroomTeacherName || '',
+              assignedTeacherNames: teacherNames || cls.homeroomTeacherName || ''
+            }).catch(() => {});
+          }
+        }
+      } catch (scriptErr) {
+        console.warn('Lỗi đồng bộ phân công qua Apps Script:', scriptErr);
+      }
+    }
+
+    this.triggerAutoSync('classes');
+    this.triggerAutoSync('users');
+
+    if (oauthOk || appsScriptOk) {
+      return {
+        success: true,
+        message: 'Đã lưu và đồng bộ phân công lên Google Sheet (LopHoc & GiaoVien) thành công!'
+      };
+    }
+
+    return {
+      success: true,
+      message: 'Đã lưu phân công vào hệ thống (Tự động đồng bộ khi kết nối Google Sheet)!'
+    };
+  }
+
+  /**
    * Tải danh sách Tên bài học từ sheet TenBaiHoc trên Google Sheet về LMS
    */
   static async pullLessonsFromSheet(
@@ -1977,6 +2077,7 @@ export class GoogleSheetsService {
               const phone = String(row[9] || '').trim();
               const status = String(row[10] || 'ACTIVE').trim().toUpperCase() === 'LOCKED' ? 'LOCKED' : 'ACTIVE';
               const createdAt = String(row[11] || new Date().toISOString().split('T')[0]);
+              const avatarUrl = row[12] ? String(row[12]).trim() : undefined;
 
               let matchedClass = classes.find((c) => c.name === classStr || c.id === classStr);
               if (!matchedClass && (classStr === '8/7' || classStr === '8.7' || classStr === '8-7')) {
@@ -2008,7 +2109,8 @@ export class GoogleSheetsService {
                 phone,
                 status,
                 schoolId: 'school-phuho-01',
-                createdAt
+                createdAt,
+                avatarUrl: avatarUrl || undefined
               });
             }
 

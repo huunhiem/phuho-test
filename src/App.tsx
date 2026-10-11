@@ -23,29 +23,44 @@ import { GoogleSheetsService } from './services/googleSheetsService';
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
-  const stored = LMSStorageService.getStoredUser();
+    const stored = LMSStorageService.getStoredUser();
 
-  if (!stored) {
-    return null;
-  }
+    if (!stored) {
+      return null;
+    }
 
-  const status = String(
-    (stored as any).status ??
-    (stored as any).Status ??
-    'ACTIVE'
-  ).toUpperCase();
+    const status = String(
+      (stored as any).status ??
+      (stored as any).Status ??
+      'ACTIVE'
+    ).toUpperCase();
 
-  if (
-    status === 'LOCKED' ||
-    status === '0' ||
-    status === 'FALSE'
-  ) {
-    LMSStorageService.clearCurrentUser();
-    return null;
-  }
+    if (
+      status === 'LOCKED' ||
+      status === '0' ||
+      status === 'FALSE'
+    ) {
+      LMSStorageService.clearCurrentUser();
+      return null;
+    }
 
-  return stored;
-});
+    // Đảm bảo nạp avatarUrl và thông tin mới nhất từ danh mục người dùng
+    const allUsers = LMSStorageService.getUsers();
+    const matched = allUsers.find(
+      (u) =>
+        u.id === stored.id ||
+        (Boolean(u.username && stored.username) && u.username.toLowerCase() === stored.username.toLowerCase())
+    );
+    if (matched) {
+      return {
+        ...stored,
+        ...matched,
+        avatarUrl: matched.avatarUrl || stored.avatarUrl
+      };
+    }
+
+    return stored;
+  });
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const getDefaultTabForRole = (role: UserRole): NavTab => {
@@ -73,9 +88,20 @@ export default function App() {
 
   // Khi đăng nhập thành công, lưu tài khoản và kích hoạt màn hình đúng theo vai trò của tài khoản đó
   const handleLoginSuccess = (user: User) => {
-    setCurrentUser(user);
-    LMSStorageService.setCurrentUser(user);
-    setActiveTab(getDefaultTabForRole(user.role));
+    // Luôn lấy bản ghi người dùng mới nhất từ hệ thống để đảm bảo đầy đủ ảnh đại diện
+    const allUsers = LMSStorageService.getUsers();
+    const matched = allUsers.find(
+      (u) =>
+        u.id === user.id ||
+        (Boolean(u.username && user.username) && u.username.toLowerCase() === user.username.toLowerCase())
+    );
+    const resolvedUser = matched
+      ? { ...user, ...matched, avatarUrl: matched.avatarUrl || user.avatarUrl }
+      : user;
+
+    setCurrentUser(resolvedUser);
+    LMSStorageService.setCurrentUser(resolvedUser);
+    setActiveTab(getDefaultTabForRole(resolvedUser.role));
     GoogleSheetsService.pullQuestionsFromAppsScript().catch(() => {});
   };
 

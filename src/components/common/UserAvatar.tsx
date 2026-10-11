@@ -99,16 +99,17 @@ export const UserAvatar: React.FC<UserAvatarProps> = ({
 
   const primaryDirectUrl = GoogleDriveService.getDriveDirectImageUrl(rawUrl);
   const fallbackThumbUrl = GoogleDriveService.getDriveThumbnailUrl(rawUrl, 300);
+  const isDataUrl = rawUrl.startsWith('data:image/');
 
   const [currentSrc, setCurrentSrc] = useState<string>(primaryDirectUrl);
   const [attemptLevel, setAttemptLevel] = useState<number>(0); // 0 = primary, 1 = fallback thumb, 2 = failed
-  const [isLoaded, setIsLoaded] = useState<boolean>(false);
+  const [isLoaded, setIsLoaded] = useState<boolean>(() => isDataUrl);
 
   useEffect(() => {
     const newDirect = GoogleDriveService.getDriveDirectImageUrl(rawUrl);
     setCurrentSrc(newDirect);
     setAttemptLevel(0);
-    setIsLoaded(false);
+    setIsLoaded(rawUrl.startsWith('data:image/'));
   }, [rawUrl]);
 
   const handleImageError = () => {

@@ -442,11 +442,42 @@ export class LMSStorageService {
   }
 
   static updateUser(user: User): void {
-    const list = this.getUsers().map((u) => (u.id === user.id ? user : u));
+    let matched = false;
+    const list = this.getUsers().map((u) => {
+      const isMatch =
+        u.id === user.id ||
+        (Boolean(u.username && user.username) && u.username.toLowerCase() === user.username.toLowerCase()) ||
+        (Boolean(u.studentCode && user.studentCode) && u.studentCode!.toLowerCase() === user.studentCode!.toLowerCase()) ||
+        (Boolean(u.teacherCode && user.teacherCode) && u.teacherCode!.toLowerCase() === user.teacherCode!.toLowerCase());
+
+      if (isMatch) {
+        matched = true;
+        return {
+          ...u,
+          ...user,
+          avatarUrl: user.avatarUrl !== undefined ? user.avatarUrl : u.avatarUrl
+        };
+      }
+      return u;
+    });
+
+    if (!matched) {
+      list.push(user);
+    }
+
     setStored(STORAGE_KEYS.USERS, list);
+
     const current = this.getCurrentUser();
-    if (current && current.id === user.id) {
-      this.setCurrentUser(user);
+    if (
+      current &&
+      (current.id === user.id ||
+        (Boolean(current.username && user.username) && current.username.toLowerCase() === user.username.toLowerCase()))
+    ) {
+      this.setCurrentUser({
+        ...current,
+        ...user,
+        avatarUrl: user.avatarUrl !== undefined ? user.avatarUrl : current.avatarUrl
+      });
     }
     notifyChange('users');
   }
@@ -477,11 +508,26 @@ export class LMSStorageService {
     const existing = this.getUsers();
     const userMap = new Map<string, User>();
     existing.forEach((u) => userMap.set(u.id, u));
+
     newStudents.forEach((u) => {
       // If newly imported, ensure it is unflagged from deleted IDs
       deletedIds.delete(u.id);
-      userMap.set(u.id, u);
+      const prev =
+        userMap.get(u.id) ||
+        existing.find(
+          (e) =>
+            Boolean(e.username && u.username) &&
+            e.username.toLowerCase() === u.username.toLowerCase()
+        );
+
+      userMap.set(u.id, {
+        ...prev,
+        ...u,
+        // Bảo tồn avatarUrl đã có nếu lượt import này chưa có avatar
+        avatarUrl: u.avatarUrl || prev?.avatarUrl
+      });
     });
+
     setStored(STORAGE_KEYS.DELETED_USER_IDS, Array.from(deletedIds));
     const updated = Array.from(userMap.values());
     setStored(STORAGE_KEYS.USERS, updated);

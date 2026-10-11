@@ -61,6 +61,7 @@ export const ClassManagement: React.FC = () => {
 
   // Teacher Assignment Modal (Phân công giảng dạy theo giáo viên)
   const [isAssignModalOpen, setIsAssignModalOpen] = useState(false);
+  const [isSavingAssignment, setIsSavingAssignment] = useState(false);
   const [selectedTeacherId, setSelectedTeacherId] = useState<string>('');
   const [assignedClassIdsForTeacher, setAssignedClassIdsForTeacher] = useState<string[]>([]);
 
@@ -304,29 +305,40 @@ export const ClassManagement: React.FC = () => {
     setAssignedClassIdsForTeacher(assignedClassIdsForTeacher.filter((id) => !gradeClassIds.has(id)));
   };
 
-  // Lưu phân công giảng dạy
-  const handleSaveTeacherAssignment = () => {
+  // Lưu phân công giảng dạy và đồng bộ ngay lập tức vào Google Sheet
+  const handleSaveTeacherAssignment = async () => {
     if (!selectedTeacherId) return;
     const targetTeacher = teachers.find((t) => t.id === selectedTeacherId);
-    LMSStorageService.assignTeacherToClasses(selectedTeacherId, assignedClassIdsForTeacher);
+    setIsSavingAssignment(true);
 
-    // Kích hoạt đồng bộ Google Sheet
-    GoogleSheetsService.triggerAutoSync('classes');
-    GoogleSheetsService.triggerAutoSync('users');
+    try {
+      // 1. Cập nhật dữ liệu vào Storage hệ thống
+      LMSStorageService.assignTeacherToClasses(selectedTeacherId, assignedClassIdsForTeacher);
 
-    const classNames = classes
-      .filter((c) => assignedClassIdsForTeacher.includes(c.id))
-      .map((c) => c.name)
-      .join(', ');
+      const classNames = classes
+        .filter((c) => assignedClassIdsForTeacher.includes(c.id))
+        .map((c) => c.name)
+        .join(', ');
 
-    // Đẩy cập nhật lên Apps Script
-    GoogleSheetsService.pushAllDataViaAppsScript().catch(() => {});
+      // 2. Đồng bộ trực tiếp lên Google Sheet (sheet LopHoc & GiaoVien)
+      const syncResult = await GoogleSheetsService.syncClassAssignments(
+        selectedTeacherId,
+        assignedClassIdsForTeacher
+      );
 
-    showToast(
-      `✓ Đã cập nhật phân công giảng dạy cho ${targetTeacher?.fullName}: ${classNames || 'Không có lớp'} (Đồng bộ Google Sheet LopHoc & GiaoVien)!`
-    );
-    refreshData();
-    setIsAssignModalOpen(false);
+      showToast(
+        `✓ Đã cập nhật phân công giảng dạy cho ${targetTeacher?.fullName}: ${classNames || 'Không có lớp'} (Đồng bộ Google Sheet LopHoc & GiaoVien thành công)!`
+      );
+      refreshData();
+      setIsAssignModalOpen(false);
+    } catch (err: any) {
+      console.warn('Lỗi khi lưu phân công:', err);
+      showToast(`✓ Đã lưu phân công cho ${targetTeacher?.fullName} vào hệ thống cục bộ!`);
+      refreshData();
+      setIsAssignModalOpen(false);
+    } finally {
+      setIsSavingAssignment(false);
+    }
   };
 
   // Đồng bộ toàn bộ Lớp học & Phân công lên Google Sheet
@@ -1008,11 +1020,21 @@ export const ClassManagement: React.FC = () => {
               </button>
               <button
                 type="button"
+                disabled={isSavingAssignment}
                 onClick={handleSaveTeacherAssignment}
-                className="px-4 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-xs transition-colors flex items-center gap-1.5"
+                className="px-4 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 rounded-lg shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
               >
-                <CheckCircle2 className="w-4 h-4" />
-                <span>Lưu phân công & Cập nhật Google Sheet</span>
+                {isSavingAssignment ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Đang lưu & Cập nhật Google Sheet...</span>
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>Lưu phân công & Cập nhật Google Sheet</span>
+                  </>
+                )}
               </button>
             </div>
           </div>

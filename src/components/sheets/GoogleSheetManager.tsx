@@ -915,6 +915,55 @@ function doPost(e) {
       return jsonResponse({ success: true, action: 'not_found' });
     }
 
+    // Cập nhật phân công giảng dạy cho Giáo viên (sheet LopHoc & GiaoVien)
+    if (action === 'saveTeacherAssignment' || action === 'assignClasses') {
+      if (!ss) return jsonResponse({ error: 'Không tìm thấy Google Sheet' });
+      var lhSheet = ss.getSheetByName('LopHoc');
+      if (!lhSheet) {
+        lhSheet = ss.insertSheet('LopHoc');
+      }
+      if (payload.classesRows && payload.classesRows.length > 0) {
+        lhSheet.clearContents();
+        var numR = payload.classesRows.length;
+        var numC = payload.classesRows[0].length || 1;
+        try {
+          lhSheet.getRange(1, 1, numR, numC).setNumberFormat('@');
+        } catch(fmtErr) {}
+        lhSheet.getRange(1, 1, numR, numC).setValues(payload.classesRows);
+      }
+
+      var gvSheet = ss.getSheetByName('GiaoVien');
+      if (gvSheet && payload.teachersRows && payload.teachersRows.length > 0) {
+        gvSheet.clearContents();
+        var gvR = payload.teachersRows.length;
+        var gvC = payload.teachersRows[0].length || 1;
+        try {
+          gvSheet.getRange(1, 1, gvR, gvC).setNumberFormat('@');
+        } catch(gvFmtErr) {}
+        gvSheet.getRange(1, 1, gvR, gvC).setValues(payload.teachersRows);
+      }
+      return jsonResponse({ success: true, action: 'assignment_saved' });
+    }
+
+    // Cập nhật thông tin tài khoản hoặc ảnh đại diện (TaiKhoan & HocSinh/GiaoVien)
+    if (action === 'updateUser' || action === 'saveUser') {
+      if (!ss) return jsonResponse({ error: 'Không tìm thấy Google Sheet' });
+      var tkSheet = ss.getSheetByName('TaiKhoan');
+      if (tkSheet) {
+        var tkData = tkSheet.getDataRange().getValues();
+        for (var uIdx = 1; uIdx < tkData.length; uIdx++) {
+          if (tkData[uIdx][0] == payload.id || tkData[uIdx][1] == payload.username) {
+            if (payload.fullName) tkSheet.getRange(uIdx + 1, 4).setValue(payload.fullName);
+            if (payload.email) tkSheet.getRange(uIdx + 1, 5).setValue(payload.email);
+            if (payload.phone) tkSheet.getRange(uIdx + 1, 10).setValue(payload.phone);
+            if (payload.avatarUrl) tkSheet.getRange(uIdx + 1, 13).setValue(payload.avatarUrl);
+            break;
+          }
+        }
+      }
+      return jsonResponse({ success: true, action: 'user_updated' });
+    }
+
     // Đẩy toàn bộ dữ liệu nhiều Sheet một lúc (Batch Push All Sheets)
     // Hỗ trợ đồng bộ tốc độ cao cho DeThi, GiaoDe, TenBaiHoc, BangDiem, TaiKhoan, HocSinh, LopHoc,...
     if (action === 'batchPushAllData') {

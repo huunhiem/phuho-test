@@ -187,6 +187,16 @@ export const UserManagement: React.FC = () => {
       };
       LMSStorageService.updateUser(updated);
       GoogleSheetsService.triggerAutoSync('users');
+
+      GoogleSheetsService.postToAppsScript({
+        action: 'updateUser',
+        id: updated.id,
+        username: updated.username,
+        fullName: updated.fullName,
+        email: updated.email,
+        phone: updated.phone,
+        avatarUrl: updated.avatarUrl || ''
+      }).catch(() => {});
     } else {
       const selectedClass = classes.find((c) => c.id === formData.classId);
       const newUser: User = {
@@ -207,6 +217,22 @@ export const UserManagement: React.FC = () => {
       };
       LMSStorageService.addUser(newUser);
       GoogleSheetsService.triggerAutoSync('users');
+
+      GoogleSheetsService.postToAppsScript({
+        action: 'addUser',
+        id: newUser.id,
+        username: newUser.username,
+        password: newUser.password,
+        fullName: newUser.fullName,
+        email: newUser.email,
+        role: newUser.role,
+        code: newUser.studentCode || newUser.teacherCode || '',
+        grade: newUser.gradeId || '',
+        className: selectedClass?.name || '',
+        phone: newUser.phone,
+        status: 'ACTIVE',
+        avatarUrl: newUser.avatarUrl || ''
+      }).catch(() => {});
     }
 
     setIsModalOpen(false);

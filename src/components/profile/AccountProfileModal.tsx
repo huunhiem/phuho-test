@@ -61,6 +61,46 @@ export const AccountProfileModal: React.FC<AccountProfileModalProps> = ({
 
   if (!isOpen) return null;
 
+  // Nén ảnh kích thước vừa vặn cho avatar (max 256x256) giúp load siêu nhanh và không tràn dung lượng localStorage
+  const optimizeAvatar = async (file: File): Promise<string> => {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const MAX_SIZE = 256;
+          let width = img.width;
+          let height = img.height;
+          if (width > height) {
+            if (width > MAX_SIZE) {
+              height = Math.round((height * MAX_SIZE) / width);
+              width = MAX_SIZE;
+            }
+          } else {
+            if (height > MAX_SIZE) {
+              width = Math.round((width * MAX_SIZE) / height);
+              height = MAX_SIZE;
+            }
+          }
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(img, 0, 0, width, height);
+            resolve(canvas.toDataURL('image/jpeg', 0.85));
+          } else {
+            resolve(e.target?.result as string);
+          }
+        };
+        img.onerror = () => resolve(e.target?.result as string);
+        img.src = e.target?.result as string;
+      };
+      reader.onerror = () => resolve('');
+      reader.readAsDataURL(file);
+    });
+  };
+
   const handleAvatarFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -70,42 +110,67 @@ export const AccountProfileModal: React.FC<AccountProfileModalProps> = ({
       return;
     }
 
-    if (file.size > 5 * 1024 * 1024) {
-      setErrorMessage('Dung lượng ảnh đại diện không được vượt quá 5MB!');
+    if (file.size > 10 * 1024 * 1024) {
+      setErrorMessage('Dung lượng ảnh đại diện không được vượt quá 10MB!');
       return;
     }
 
     setIsUploadingAvatar(true);
-    setAvatarUploadStatus('Đang đọc hình ảnh...');
+    setAvatarUploadStatus('Đang tối ưu hình ảnh...');
     setErrorMessage('');
 
-    // Đọc dataUrl để hiển thị preview ngay lập tức
-    const previewDataUrl = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
-
-    setAvatarUrl(previewDataUrl);
+    // Đọc và nén ảnh để hiển thị preview ngay lập tức
+    const optimizedDataUrl = await optimizeAvatar(file);
+    const effectivePreview = optimizedDataUrl || '';
+    setAvatarUrl(effectivePreview);
     setAvatarUploadStatus('Đang tải ảnh đại diện lên Google Drive...');
 
     try {
-      const uploadRes = await GoogleDriveService.uploadAvatar(file, currentUser.username);
-      if (uploadRes && uploadRes.displayUrl) {
-        setAvatarUrl(uploadRes.displayUrl);
-        if (uploadRes.viewLink) {
+      const uploadRes = await GoogleDriveService.uploadAvatar(optimizedDataUrl || file, currentUser.username);
+      const finalAvatarUrl = uploadRes?.displayUrl || effectivePreview;
+
+      if (finalAvatarUrl) {
+        setAvatarUrl(finalAvatarUrl);
+        if (uploadRes?.viewLink) {
           setDriveViewLink(uploadRes.viewLink);
           setAvatarUploadStatus('✓ Đã tải và lưu trữ ảnh đại diện lên Google Drive thành công!');
         } else {
           setAvatarUploadStatus('✓ Đã lưu ảnh đại diện vào hệ thống!');
         }
-      } else {
-        setAvatarUploadStatus('✓ Đã lưu ảnh đại diện vào hệ thống!');
+
+        // Tự động lưu ngay lập tức vào tài khoản và đồng bộ để người dùng thoát ra vào lại vẫn giữ nguyên 100%
+        const updatedUser: User = {
+          ...currentUser,
+          avatarUrl: finalAvatarUrl
+        };
+        LMSStorageService.updateUser(updatedUser);
+        LMSStorageService.setCurrentUser(updatedUser);
+        onUserUpdated(updatedUser);
+        GoogleSheetsService.triggerAutoSync('users');
+
+        GoogleSheetsService.postToAppsScript({
+          action: 'updateUser',
+          id: updatedUser.id,
+          username: updatedUser.username,
+          fullName: updatedUser.fullName,
+          email: updatedUser.email,
+          phone: updatedUser.phone,
+          avatarUrl: finalAvatarUrl
+        }).catch(() => {});
       }
     } catch (err: any) {
       console.warn('Lỗi tải avatar lên Google Drive:', err);
       setAvatarUploadStatus('✓ Đã lưu ảnh đại diện vào hệ thống (cục bộ)!');
+
+      if (effectivePreview) {
+        const updatedUser: User = {
+          ...currentUser,
+          avatarUrl: effectivePreview
+        };
+        LMSStorageService.updateUser(updatedUser);
+        LMSStorageService.setCurrentUser(updatedUser);
+        onUserUpdated(updatedUser);
+      }
     } finally {
       setIsUploadingAvatar(false);
     }
