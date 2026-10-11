@@ -21,6 +21,7 @@ import { Submission, Question, User, Assignment, Test, ClassRoom } from '../../t
 import { LMSStorageService } from '../../services/storage';
 import { GoogleDriveService } from '../../services/googleDriveService';
 import { onStorageChange } from '../../services/storageEvents';
+import { UserAvatar } from '../common/UserAvatar';
 
 interface ResultsAndGradingProps {
   currentUser: User;
@@ -456,9 +457,19 @@ export const ResultsAndGrading: React.FC<ResultsAndGradingProps> = ({ currentUse
 
                       {/* Họ tên và Mã HS */}
                       <td className="px-4 py-3">
-                        <div className="font-bold text-slate-900">{item.fullName}</div>
-                        <div className="text-[11px] text-slate-400 font-mono font-medium">
-                          {item.studentCode}
+                        <div className="flex items-center gap-2.5">
+                          <UserAvatar
+                            avatarUrl={item.avatarUrl}
+                            name={item.fullName}
+                            role="STUDENT"
+                            size="sm"
+                          />
+                          <div>
+                            <div className="font-bold text-slate-900">{item.fullName}</div>
+                            <div className="text-[11px] text-slate-400 font-mono font-medium">
+                              {item.studentCode}
+                            </div>
+                          </div>
                         </div>
                       </td>
 

@@ -276,6 +276,36 @@ export class LMSStorageService {
   static deleteClass(id: string): void {
     const list = this.getClasses().filter((c) => c.id !== id);
     setStored(STORAGE_KEYS.CLASSES, list);
+
+    // Tự động gỡ bỏ liên kết học sinh và phân công giáo viên đối với lớp bị xóa
+    const users = this.getUsers();
+    let hasUserChanges = false;
+    const updatedUsers = users.map((u) => {
+      let changed = false;
+      let newClassId = u.classId;
+      let newAssigned = u.assignedClassIds;
+
+      if (u.classId === id) {
+        newClassId = undefined;
+        changed = true;
+      }
+      if (u.assignedClassIds && u.assignedClassIds.includes(id)) {
+        newAssigned = u.assignedClassIds.filter((cid) => cid !== id);
+        changed = true;
+      }
+
+      if (changed) {
+        hasUserChanges = true;
+        return { ...u, classId: newClassId, assignedClassIds: newAssigned };
+      }
+      return u;
+    });
+
+    if (hasUserChanges) {
+      setStored(STORAGE_KEYS.USERS, updatedUsers);
+      notifyChange('users');
+    }
+
     notifyChange('classes');
   }
 
@@ -1062,6 +1092,7 @@ export class LMSStorageService {
       fullName: string;
       className: string;
       classId: string;
+      avatarUrl?: string;
       participated: boolean;
       submission?: Submission;
     }>;
@@ -1071,6 +1102,7 @@ export class LMSStorageService {
       fullName: string;
       className: string;
       classId: string;
+      avatarUrl?: string;
       submission: Submission;
     }>;
     notParticipatedStudents: Array<{
@@ -1079,6 +1111,7 @@ export class LMSStorageService {
       fullName: string;
       className: string;
       classId: string;
+      avatarUrl?: string;
       homeroomTeacherName?: string;
     }>;
     stats: {
@@ -1176,6 +1209,7 @@ export class LMSStorageService {
       fullName: string;
       className: string;
       classId: string;
+      avatarUrl?: string;
       submission: Submission;
     }> = [];
 
@@ -1185,6 +1219,7 @@ export class LMSStorageService {
       fullName: string;
       className: string;
       classId: string;
+      avatarUrl?: string;
       homeroomTeacherName?: string;
     }> = [];
 
@@ -1194,12 +1229,14 @@ export class LMSStorageService {
     matchingSubs.forEach((sub) => {
       submittedStudentIds.add(sub.studentId);
       if (sub.studentCode) submittedStudentCodes.add(sub.studentCode.toLowerCase());
+      const stu = studentUsers.find((u) => u.id === sub.studentId || (u.studentCode && sub.studentCode && u.studentCode.toLowerCase() === sub.studentCode.toLowerCase()));
       participatedList.push({
         id: sub.studentId,
         studentCode: sub.studentCode,
         fullName: sub.studentName,
         className: sub.className,
         classId: sub.classId,
+        avatarUrl: stu?.avatarUrl,
         submission: sub
       });
     });
@@ -1216,6 +1253,7 @@ export class LMSStorageService {
           fullName: stu.fullName,
           className: getClassName(stu.classId),
           classId: stu.classId || '',
+          avatarUrl: stu.avatarUrl,
           homeroomTeacherName: getHomeroomTeacher(stu.classId)
         });
       }
@@ -1228,6 +1266,7 @@ export class LMSStorageService {
         fullName: p.fullName,
         className: p.className,
         classId: p.classId,
+        avatarUrl: p.avatarUrl,
         participated: true,
         submission: p.submission
       })),
@@ -1237,6 +1276,7 @@ export class LMSStorageService {
         fullName: np.fullName,
         className: np.className,
         classId: np.classId,
+        avatarUrl: np.avatarUrl,
         participated: false,
         submission: undefined
       }))

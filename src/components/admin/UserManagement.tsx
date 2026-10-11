@@ -23,6 +23,8 @@ import {
 import { User, UserRole } from '../../types';
 import { LMSStorageService } from '../../services/storage';
 import { ConfirmDialog } from '../common/ConfirmDialog';
+import { UserAvatar } from '../common/UserAvatar';
+import { GoogleDriveService } from '../../services/googleDriveService';
 import {
   GoogleSheetsService,
   subscribeAutoSyncStatus,
@@ -65,7 +67,8 @@ export const UserManagement: React.FC = () => {
     studentCode: '',
     teacherCode: '',
     classId: '',
-    gradeId: 'grade-6'
+    gradeId: 'grade-6',
+    avatarUrl: ''
   });
 
   // Excel / CSV Import Modal
@@ -73,6 +76,8 @@ export const UserManagement: React.FC = () => {
   const [importText, setImportText] = useState('');
   const [importPreview, setImportPreview] = useState<any[]>([]);
   const [importSuccessMessage, setImportSuccessMessage] = useState('');
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+  const [avatarUploadStatus, setAvatarUploadStatus] = useState('');
 
   const refreshUsers = () => {
     setUsers(LMSStorageService.getUsers());
@@ -80,6 +85,7 @@ export const UserManagement: React.FC = () => {
 
   const handleOpenAdd = () => {
     setEditingUser(null);
+    setAvatarUploadStatus('');
     const randomCode = `PH25-${Math.floor(100000 + Math.random() * 900000)}`;
     setFormData({
       username: `hs.${randomCode.toLowerCase().replace(/[^a-z0-9]/g, '')}`,
@@ -91,7 +97,8 @@ export const UserManagement: React.FC = () => {
       studentCode: randomCode,
       teacherCode: '',
       classId: classes[0]?.id || '',
-      gradeId: 'grade-6'
+      gradeId: 'grade-6',
+      avatarUrl: ''
     });
     setShowModalPassword(false);
     setIsModalOpen(true);
@@ -99,6 +106,7 @@ export const UserManagement: React.FC = () => {
 
   const handleOpenEdit = (user: User) => {
     setEditingUser(user);
+    setAvatarUploadStatus('');
     setFormData({
       username: user.username || user.email.split('@')[0],
       password: user.password || '123456',
@@ -109,7 +117,8 @@ export const UserManagement: React.FC = () => {
       studentCode: user.studentCode || '',
       teacherCode: user.teacherCode || '',
       classId: user.classId || '',
-      gradeId: user.gradeId || 'grade-6'
+      gradeId: user.gradeId || 'grade-6',
+      avatarUrl: user.avatarUrl || ''
     });
     setShowModalPassword(false);
     setIsModalOpen(true);
@@ -173,6 +182,7 @@ export const UserManagement: React.FC = () => {
       const updated: User = {
         ...editingUser,
         ...formData,
+        avatarUrl: formData.avatarUrl?.trim() || undefined,
         gradeId: formData.role === 'STUDENT' ? (selectedClass?.gradeId || formData.gradeId || 'grade-6') : undefined
       };
       LMSStorageService.updateUser(updated);
@@ -187,6 +197,7 @@ export const UserManagement: React.FC = () => {
         email: formData.email,
         role: formData.role,
         phone: formData.phone,
+        avatarUrl: formData.avatarUrl?.trim() || undefined,
         schoolId: 'school-phuho-01',
         classId: formData.role === 'STUDENT' ? formData.classId : undefined,
         gradeId: formData.role === 'STUDENT' ? (selectedClass?.gradeId || formData.gradeId || 'grade-6') : undefined,
@@ -424,7 +435,20 @@ export const UserManagement: React.FC = () => {
 
                   return (
                     <tr key={user.id} className="hover:bg-slate-50/80 transition-colors">
-                      <td className="px-4 py-3 font-semibold text-slate-900">{user.fullName}</td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2.5">
+                          <UserAvatar user={user} size="sm" />
+                          <div>
+                            <div className="font-semibold text-slate-900 leading-tight">{user.fullName}</div>
+                            {user.avatarUrl && (
+                              <div className="text-[10px] text-emerald-600 font-medium inline-flex items-center gap-1 mt-0.5" title="Đã có ảnh đại diện đồng bộ Google Drive">
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                                <span>Drive Avatar</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </td>
                       <td className="px-4 py-3 text-slate-600">
                         <div className="font-mono text-indigo-700 font-semibold">@{user.username || user.email.split('@')[0]}</div>
                         <div className="text-[11px] text-slate-400">{user.email}</div>
@@ -520,6 +544,61 @@ export const UserManagement: React.FC = () => {
             </h2>
 
             <form onSubmit={handleSave} className="space-y-3.5 text-xs">
+              {/* Avatar Section */}
+              <div className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl border border-slate-200">
+                <UserAvatar
+                  avatarUrl={formData.avatarUrl}
+                  name={formData.fullName}
+                  role={formData.role}
+                  size="md"
+                />
+                <div className="flex-1 min-w-0 space-y-1">
+                  <div className="flex items-center justify-between">
+                    <label className="font-semibold text-slate-700">Ảnh đại diện (Google Drive URL)</label>
+                    {GoogleDriveService.extractDriveFileId(formData.avatarUrl) && (
+                      <span className="text-[10px] text-emerald-600 font-medium">✓ Drive link</span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="url"
+                      value={formData.avatarUrl}
+                      onChange={(e) => setFormData({ ...formData, avatarUrl: e.target.value })}
+                      placeholder="https://drive.google.com/... hoặc chọn tải lên"
+                      className="flex-1 px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white font-mono text-[11px] focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                    <label className="px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg cursor-pointer transition-colors shrink-0 font-medium inline-flex items-center gap-1">
+                      <span>{isUploadingAvatar ? 'Đang tải...' : 'Tải lên Drive'}</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          if (!file) return;
+                          setIsUploadingAvatar(true);
+                          setAvatarUploadStatus('Đang tải lên Drive...');
+                          try {
+                            const res = await GoogleDriveService.uploadAvatar(file, formData.username || 'user');
+                            if (res && res.displayUrl) {
+                              setFormData((prev) => ({ ...prev, avatarUrl: res.displayUrl }));
+                              setAvatarUploadStatus('✓ Đã tải ảnh lên Drive thành công!');
+                            }
+                          } catch (err: any) {
+                            setAvatarUploadStatus('Lỗi tải ảnh');
+                          } finally {
+                            setIsUploadingAvatar(false);
+                          }
+                        }}
+                      />
+                    </label>
+                  </div>
+                  {avatarUploadStatus && (
+                    <div className="text-[10px] text-indigo-600 font-medium">{avatarUploadStatus}</div>
+                  )}
+                </div>
+              </div>
+
               <div>
                 <label className="block font-medium text-slate-700 mb-1">Họ và tên *</label>
                 <input

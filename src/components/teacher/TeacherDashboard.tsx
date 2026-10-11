@@ -16,6 +16,7 @@ import { LMSStorageService } from '../../services/storage';
 import { onStorageChange } from '../../services/storageEvents';
 import { NavTab } from '../Sidebar';
 import { AccountProfileModal } from '../profile/AccountProfileModal';
+import { UserAvatar } from '../common/UserAvatar';
 
 interface TeacherDashboardProps {
   currentUser: User;
@@ -85,16 +86,19 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ currentUser,
       {/* Welcome banner */}
       <div className="bg-linear-to-r from-indigo-700 to-indigo-900 rounded-2xl p-6 text-white shadow-md">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/10 text-white/90 text-xs font-semibold mb-2 backdrop-blur-xs">
-              <span>Tổ Tin học - Công nghệ</span>
-              <span>·</span>
-              <span>THCS Phú Hồ</span>
+          <div className="flex items-center gap-4">
+            <UserAvatar user={currentUser} size="lg" className="ring-4 ring-white/20 shadow-lg shrink-0" />
+            <div>
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/10 text-white/90 text-xs font-semibold mb-2 backdrop-blur-xs">
+                <span>Tổ Tin học - Công nghệ</span>
+                <span>·</span>
+                <span>THCS Phú Hồ</span>
+              </div>
+              <h1 className="text-2xl font-bold tracking-tight">Kính chào Thầy/Cô {currentUser.fullName}</h1>
+              <p className="text-indigo-100 text-xs mt-1 max-w-xl">
+                Hệ thống LMS Tin học THCS đã sẵn sàng cho năm học 2025-2026. Quản lý ngân hàng câu hỏi, tạo đề theo ma trận và giám sát kết quả học sinh.
+              </p>
             </div>
-            <h1 className="text-2xl font-bold tracking-tight">Kính chào Thầy/Cô {currentUser.fullName}</h1>
-            <p className="text-indigo-100 text-xs mt-1 max-w-xl">
-              Hệ thống LMS Tin học THCS đã sẵn sàng cho năm học 2025-2026. Quản lý ngân hàng câu hỏi, tạo đề theo ma trận và giám sát kết quả học sinh.
-            </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">

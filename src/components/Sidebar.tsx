@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { User, UserRole } from '../types';
 import { ROLE_METAS } from './Header';
+import { UserAvatar } from './common/UserAvatar';
 
 export type NavTab =
   | 'admin_dashboard'
@@ -151,9 +152,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {/* User Role Card in Sidebar - Cố định vai trò */}
           <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
             <div className="flex items-center gap-2 mb-1.5">
-              <div className="w-7 h-7 rounded-lg bg-indigo-600 text-white flex items-center justify-center font-bold text-xs shadow-2xs shrink-0">
-                {currentUser.fullName.charAt(0)}
-              </div>
+              <UserAvatar user={currentUser} size="sm" showBadge />
               <div className="min-w-0 flex-1">
                 <div className="text-xs font-bold text-slate-800 truncate">
                   {currentUser.fullName}

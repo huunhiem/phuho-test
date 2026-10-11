@@ -16,6 +16,7 @@ import { User, Assignment, Submission } from '../../types';
 import { LMSStorageService } from '../../services/storage';
 import { ExamRoom } from './ExamRoom';
 import { AccountProfileModal } from '../profile/AccountProfileModal';
+import { UserAvatar } from '../common/UserAvatar';
 
 interface StudentDashboardProps {
   currentUser: User;
@@ -75,25 +76,28 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser 
       {/* Student Welcome Card */}
       <div className="bg-linear-to-r from-sky-600 to-indigo-700 rounded-2xl p-6 text-white shadow-md">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/10 text-white/90 text-xs font-semibold mb-2 backdrop-blur-xs">
-              <span>Học sinh Lớp {studentClass}</span>
-              <span>·</span>
-              <span>Trường THCS Phú Hồ</span>
-            </div>
-            <h1 className="text-2xl font-bold tracking-tight">Chào em, {currentUser.fullName}!</h1>
-            <p className="text-sky-100 text-xs mt-1">
-              Mã học sinh: <strong>{currentUser.studentCode}</strong> · Chúc em làm bài kiểm tra Tin học thật tốt và đạt kết quả cao!
-            </p>
-            <div className="mt-3">
-              <button
-                type="button"
-                onClick={() => setIsProfileOpen(true)}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/20 hover:bg-white/30 text-white text-xs font-semibold backdrop-blur-xs transition-colors cursor-pointer border border-white/20"
-              >
-                <UserIcon className="w-3.5 h-3.5" />
-                <span>Thay đổi thông tin / Đổi mật khẩu</span>
-              </button>
+          <div className="flex items-center gap-4">
+            <UserAvatar user={currentUser} size="lg" className="ring-4 ring-white/20 shadow-lg shrink-0" />
+            <div>
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/10 text-white/90 text-xs font-semibold mb-2 backdrop-blur-xs">
+                <span>Học sinh Lớp {studentClass}</span>
+                <span>·</span>
+                <span>Trường THCS Phú Hồ</span>
+              </div>
+              <h1 className="text-2xl font-bold tracking-tight">Chào em, {currentUser.fullName}!</h1>
+              <p className="text-sky-100 text-xs mt-1">
+                Mã học sinh: <strong>{currentUser.studentCode}</strong> · Chúc em làm bài kiểm tra Tin học thật tốt và đạt kết quả cao!
+              </p>
+              <div className="mt-3">
+                <button
+                  type="button"
+                  onClick={() => setIsProfileOpen(true)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/20 hover:bg-white/30 text-white text-xs font-semibold backdrop-blur-xs transition-colors cursor-pointer border border-white/20"
+                >
+                  <UserIcon className="w-3.5 h-3.5" />
+                  <span>Thay đổi thông tin / Đổi mật khẩu</span>
+                </button>
+              </div>
             </div>
           </div>
 

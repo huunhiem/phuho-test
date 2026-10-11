@@ -454,10 +454,10 @@ function doGet(e) {
   }
   
   // 4. Lấy danh sách lớp học
-  if (action === 'getClasses') {
+  if (action === 'getClasses' || action === 'getLopHoc') {
     var sheet = ss.getSheetByName('LopHoc');
     if (!sheet) return jsonResponse({ error: 'Chưa có sheet LopHoc' });
-    var data = sheet.getDataRange().getValues();
+    var data = sheet.getDataRange().getDisplayValues();
     return jsonResponse(data);
   }
   
@@ -481,14 +481,6 @@ function doGet(e) {
   if (action === 'getTests' || action === 'getDeThi') {
     var sheet = ss.getSheetByName('DeThi');
     if (!sheet) return jsonResponse({ error: 'Chưa có sheet DeThi' });
-    var data = sheet.getDataRange().getValues();
-    return jsonResponse(data);
-  }
-
-  // 8. Lấy danh sách lớp học và phân công
-  if (action === 'getClasses' || action === 'getLopHoc') {
-    var sheet = ss.getSheetByName('LopHoc');
-    if (!sheet) return jsonResponse({ error: 'Chưa có sheet LopHoc' });
     var data = sheet.getDataRange().getValues();
     return jsonResponse(data);
   }
@@ -876,17 +868,48 @@ function doPost(e) {
       return jsonResponse({ success: true, action: targetRow > 0 ? 'updated' : 'inserted' });
     }
 
-    // Xóa Lớp học (LopHoc)
+    // Xóa Lớp học (LopHoc) - Tối ưu hóa xử lý lỗi định dạng Ngày tháng của Google Sheet
     if (action === 'deleteClass') {
       if (!ss) return jsonResponse({ error: 'Không tìm thấy Google Sheet' });
       var lhSheet = ss.getSheetByName('LopHoc');
       if (lhSheet) {
         var lhData = lhSheet.getDataRange().getValues();
+        var lhDisplay = lhSheet.getDataRange().getDisplayValues();
+        var targetId = String(payload.id || '').trim();
+        var targetName = String(payload.name || '').trim().toLowerCase();
+        var deletedCount = 0;
+
         for (var i = lhData.length - 1; i >= 1; i--) {
-          if (lhData[i][0] == payload.id || (payload.name && lhData[i][1] == payload.name)) {
-            lhSheet.deleteRow(i + 1);
-            return jsonResponse({ success: true, action: 'deleted' });
+          var rowId = String(lhData[i][0] || '').trim();
+          var rawName = lhData[i][1];
+          var dispName = String(lhDisplay[i] ? lhDisplay[i][1] : '').trim().toLowerCase();
+          var strName = String(rawName || '').trim().toLowerCase();
+          
+          var matchName = false;
+          if (targetName) {
+            if (dispName === targetName || strName === targetName) {
+              matchName = true;
+            } else if (rawName instanceof Date) {
+              var m = rawName.getMonth() + 1;
+              var d = rawName.getDate();
+              var dateStr1 = m + '/' + d;
+              var dateStr2 = d + '/' + m;
+              if (targetName === dateStr1 || targetName === dateStr2) {
+                matchName = true;
+              }
+            }
           }
+
+          var matchId = targetId && rowId && (rowId === targetId);
+
+          if (matchId || matchName) {
+            lhSheet.deleteRow(i + 1);
+            deletedCount++;
+          }
+        }
+
+        if (deletedCount > 0) {
+          return jsonResponse({ success: true, action: 'deleted', count: deletedCount });
         }
       }
       return jsonResponse({ success: true, action: 'not_found' });

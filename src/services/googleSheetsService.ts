@@ -671,7 +671,8 @@ export class GoogleSheetsService {
         'Lớp',
         'Số điện thoại',
         'Trạng thái (Status)',
-        'Ngày tạo'
+        'Ngày tạo',
+        'Ảnh đại diện (Drive URL)'
       ],
       ...users.map((u) => {
         let clsName = classes.find((c) => c.id === u.classId)?.name;
@@ -700,7 +701,8 @@ export class GoogleSheetsService {
           clsName || '',
           u.phone || '',
           u.status || 'ACTIVE',
-          u.createdAt
+          u.createdAt,
+          u.avatarUrl || ''
         ];
       })
     ];
@@ -722,7 +724,8 @@ export class GoogleSheetsService {
         'Email',
         'Số điện thoại',
         'Trạng thái',
-        'Ngày tạo'
+        'Ngày tạo',
+        'Ảnh đại diện (Drive URL)'
       ],
       ...students.map((u) => {
         let clsName = classes.find((c) => c.id === u.classId)?.name;
@@ -750,7 +753,8 @@ export class GoogleSheetsService {
           u.email,
           u.phone || '',
           u.status || 'ACTIVE',
-          u.createdAt
+          u.createdAt,
+          u.avatarUrl || ''
         ];
       })
     ];
@@ -772,7 +776,8 @@ export class GoogleSheetsService {
         'Số điện thoại',
         'Lớp phụ trách / Ghi chú',
         'Trạng thái',
-        'Ngày tạo'
+        'Ngày tạo',
+        'Ảnh đại diện (Drive URL)'
       ],
       ...staff.map((u) => [
         u.id,
@@ -787,7 +792,8 @@ export class GoogleSheetsService {
           ? u.assignedClassIds.map((cid) => classes.find((c) => c.id === cid)?.name || cid.replace('cls-', '').replace('-', '/')).filter(Boolean).join(', ')
           : 'Toàn trường',
         u.status || 'ACTIVE',
-        u.createdAt
+        u.createdAt,
+        u.avatarUrl || ''
       ])
     ];
   }
@@ -1271,7 +1277,7 @@ export class GoogleSheetsService {
     spreadsheetId: string,
     accessToken: string
   ): Promise<number> {
-    const rows = await this.readSheetValues(spreadsheetId, 'TaiKhoan!A2:L', accessToken);
+    const rows = await this.readSheetValues(spreadsheetId, 'TaiKhoan!A2:M', accessToken);
     if (!rows || rows.length === 0) {
       // Fallback: nếu chưa có TaiKhoan thì đọc từ HocSinh
       return this.pullStudentsFromSheet(spreadsheetId, accessToken);
@@ -1284,7 +1290,7 @@ export class GoogleSheetsService {
 
     for (const row of rows) {
       if (!row || row.length < 4) continue;
-      // Headers: ID, Username, Password, FullName, Email, Role, Code, Grade, Class, Phone, Status, CreatedAt
+      // Headers: ID, Username, Password, FullName, Email, Role, Code, Grade, Class, Phone, Status, CreatedAt, AvatarUrl
       const id = row[0] || `user-gsheet-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
       const username = row[1] || row[4]?.split('@')[0] || `user_${Date.now()}`;
       const password = row[2] || '123456';
@@ -1309,6 +1315,8 @@ export class GoogleSheetsService {
         matchedClass = classes.find((c) => c.id === 'cls-8-8');
       }
 
+      const avatarUrl = row[12] ? String(row[12]).trim() : undefined;
+
       const userObj: User = {
         id,
         username,
@@ -1323,7 +1331,8 @@ export class GoogleSheetsService {
         studentCode: role === 'STUDENT' ? code : undefined,
         teacherCode: role !== 'STUDENT' ? code : undefined,
         status: (row[10] === 'LOCKED' ? 'LOCKED' : 'ACTIVE') as 'ACTIVE' | 'LOCKED',
-        createdAt: row[11] || new Date().toISOString().split('T')[0]
+        createdAt: row[11] || new Date().toISOString().split('T')[0],
+        avatarUrl: avatarUrl || undefined
       };
 
       importedUsers.push(userObj);
@@ -1345,14 +1354,14 @@ export class GoogleSheetsService {
     spreadsheetId: string,
     accessToken: string
   ): Promise<number> {
-    const rows = await this.readSheetValues(spreadsheetId, 'HocSinh!A2:K', accessToken);
+    const rows = await this.readSheetValues(spreadsheetId, 'HocSinh!A2:L', accessToken);
     const classes = LMSStorageService.getClasses();
 
     const importedUsers: User[] = [];
 
     for (const row of rows) {
       if (!row || row.length < 2) continue;
-      // Headers: ID, Họ và tên, Mã số HS, Tên đăng nhập, Mật khẩu, Lớp, Khối, Email, Số điện thoại, Trạng thái, Ngày tạo
+      // Headers: ID, Họ và tên, Mã số HS, Tên đăng nhập, Mật khẩu, Lớp, Khối, Email, Số điện thoại, Trạng thái, Ngày tạo, AvatarUrl
       const id = row[0] || `user-gsheet-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
       const fullName = row[1] || 'Học sinh';
       const studentCode = row[2] || `PH25-${Math.floor(100000 + Math.random() * 900000)}`;
@@ -1376,6 +1385,8 @@ export class GoogleSheetsService {
         matchedClass = classes.find((c) => c.id === 'cls-8-8');
       }
 
+      const avatarUrl = row[11] ? String(row[11]).trim() : undefined;
+
       importedUsers.push({
         id,
         username,
@@ -1389,7 +1400,8 @@ export class GoogleSheetsService {
         studentCode,
         phone: row[8] || '',
         status: (row[9] === 'LOCKED' ? 'LOCKED' : 'ACTIVE') as 'ACTIVE' | 'LOCKED',
-        createdAt: row[10] || new Date().toISOString().split('T')[0]
+        createdAt: row[10] || new Date().toISOString().split('T')[0],
+        avatarUrl: avatarUrl || undefined
       });
     }
 

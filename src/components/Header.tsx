@@ -21,6 +21,7 @@ import { User, UserRole } from '../types';
 import { LMSStorageService } from '../services/storage';
 import { ConfirmDialog } from './common/ConfirmDialog';
 import { AccountProfileModal } from './profile/AccountProfileModal';
+import { UserAvatar } from './common/UserAvatar';
 import {
   subscribeAutoSyncStatus,
   AutoSyncState,
@@ -225,9 +226,7 @@ export const Header: React.FC<HeaderProps> = ({
                 aria-expanded={dropdownOpen}
                 title="Thông tin tài khoản và vai trò"
               >
-                <div className="w-8 h-8 rounded-lg bg-indigo-600 text-white flex items-center justify-center font-bold text-xs shadow-2xs">
-                  {currentUser.fullName.charAt(0)}
-                </div>
+                <UserAvatar user={currentUser} size="sm" showBadge />
                 <div className="text-left hidden sm:block">
                   <div className="font-semibold text-slate-800 text-xs leading-tight">
                     {currentUser.fullName}
@@ -246,9 +245,7 @@ export const Header: React.FC<HeaderProps> = ({
                 <div className="absolute right-0 mt-2 w-80 bg-white rounded-2xl shadow-xl border border-slate-200 py-3 z-50 animate-in fade-in zoom-in-95 duration-100">
                   {/* User identity Header */}
                   <div className="px-4 pb-3 border-b border-slate-100 flex items-start gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center font-bold text-base shadow-xs shrink-0">
-                      {currentUser.fullName.charAt(0)}
-                    </div>
+                    <UserAvatar user={currentUser} size="md" showBadge />
                     <div className="min-w-0 flex-1">
                       <h4 className="text-sm font-bold text-slate-900 truncate">{currentUser.fullName}</h4>
                       <p className="text-xs text-slate-500 font-mono">@{currentUser.username}</p>

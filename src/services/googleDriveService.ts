@@ -434,40 +434,132 @@ export class GoogleDriveService {
   }
 
   /**
+   * Trích xuất mã ID tệp tin Google Drive từ các dạng link khác nhau
+   */
+  static extractDriveFileId(urlOrId: string): string | null {
+    if (!urlOrId || typeof urlOrId !== 'string') return null;
+    const trimmed = urlOrId.trim();
+    if (!trimmed) return null;
+
+    // Data url hoặc link ảnh bên ngoài
+    if (trimmed.startsWith('data:image/')) return null;
+
+    // Pattern 1: /file/d/ID or /file/u/0/d/ID
+    const matchFileD = trimmed.match(/\/file\/(?:u\/\d+\/)?d\/([a-zA-Z0-9_-]+)/);
+    if (matchFileD && matchFileD[1]) return matchFileD[1];
+
+    // Pattern 2: id=ID param (?id=... or &id=...)
+    const matchIdParam = trimmed.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+    if (matchIdParam && matchIdParam[1]) return matchIdParam[1];
+
+    // Pattern 3: lh3.googleusercontent.com/d/ID
+    const matchLh3 = trimmed.match(/googleusercontent\.com\/d\/([a-zA-Z0-9_-]+)/);
+    if (matchLh3 && matchLh3[1]) return matchLh3[1];
+
+    // Pattern 4: /open?id=ID
+    const matchOpen = trimmed.match(/\/open\?id=([a-zA-Z0-9_-]+)/);
+    if (matchOpen && matchOpen[1]) return matchOpen[1];
+
+    // Pattern 5: drive.google.com/thumbnail?id=ID
+    const matchThumb = trimmed.match(/drive\.google\.com\/thumbnail\?id=([a-zA-Z0-9_-]+)/);
+    if (matchThumb && matchThumb[1]) return matchThumb[1];
+
+    // Pattern 6: Direct raw file ID (25 to 50 chars)
+    if (/^[a-zA-Z0-9_-]{20,50}$/.test(trimmed) && !trimmed.startsWith('http')) {
+      return trimmed;
+    }
+
+    return null;
+  }
+
+  /**
    * Chuyển đổi mọi đường dẫn Google Drive (chia sẻ, view, thumbnail, direct link) thành URL nhúng trực tiếp an toàn
-   * Hỗ trợ hiển thị ảnh câu hỏi ổn định 100% trên Vercel và GitHub không bị chặn CORS
+   * Hỗ trợ hiển thị ảnh đại diện và ảnh câu hỏi ổn định 100% trên Vercel và GitHub không bị chặn CORS
    */
   static getDriveDirectImageUrl(driveUrlOrId: string): string {
     if (!driveUrlOrId || typeof driveUrlOrId !== 'string') return '';
     const trimmed = driveUrlOrId.trim();
     if (!trimmed) return '';
     
-    // Nếu là base64 data url hoặc url http thông thường không phải drive
-    if (trimmed.startsWith('data:image/') || (!trimmed.includes('drive.google.com') && !trimmed.includes('googleusercontent.com'))) {
+    // Nếu là base64 data url
+    if (trimmed.startsWith('data:image/')) {
       return trimmed;
     }
 
-    // Trích xuất File ID từ nhiều định dạng link Google Drive khác nhau
-    let fileId = '';
-    const matchFileD = trimmed.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
-    const matchIdParam = trimmed.match(/[?&]id=([a-zA-Z0-9_-]+)/);
-    const matchLh3 = trimmed.match(/\/d\/([a-zA-Z0-9_-]+)/);
-
-    if (matchFileD && matchFileD[1]) {
-      fileId = matchFileD[1];
-    } else if (matchIdParam && matchIdParam[1]) {
-      fileId = matchIdParam[1];
-    } else if (matchLh3 && matchLh3[1]) {
-      fileId = matchLh3[1];
-    } else if (/^[a-zA-Z0-9_-]{20,}$/.test(trimmed)) {
-      fileId = trimmed;
-    }
-
+    const fileId = this.extractDriveFileId(trimmed);
     if (fileId) {
       return `https://lh3.googleusercontent.com/d/${fileId}`;
     }
 
     return trimmed;
+  }
+
+  /**
+   * Lấy URL thumbnail trực tiếp từ máy chủ Google Workspace
+   */
+  static getDriveThumbnailUrl(driveUrlOrId: string, size: number = 400): string {
+    const fileId = this.extractDriveFileId(driveUrlOrId);
+    if (fileId) {
+      return `https://drive.google.com/thumbnail?id=${fileId}&sz=w${size}`;
+    }
+    return this.getDriveDirectImageUrl(driveUrlOrId);
+  }
+
+  /**
+   * Tải ảnh đại diện tài khoản lên Google Drive
+   * Tự động thử OAuth trước, nếu chưa đăng nhập Google thì tự động chuyển sang lưu vào Google Drive của trường qua Apps Script!
+   */
+  static async uploadAvatar(
+    fileOrDataUrl: File | Blob | string,
+    username: string,
+    accessToken?: string
+  ): Promise<DriveUploadResult> {
+    const token = accessToken || getGoogleAccessToken();
+    const safeUsername = (username || 'user').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const fileName = `avatar_${safeUsername}_${Date.now()}.png`;
+
+    // 1. Thử tải qua Google Drive API trực tiếp nếu có token
+    if (token) {
+      try {
+        const directRes = await this.uploadImageToDrive(fileOrDataUrl, fileName, token);
+        return directRes;
+      } catch (err: any) {
+        console.warn('Tải avatar qua OAuth Google Drive thất bại, chuyển sang Apps Script:', err);
+      }
+    }
+
+    // 2. Tải lên Google Drive của trường thông qua Apps Script
+    const scriptUrl = getAppsScriptUrl();
+    if (scriptUrl) {
+      try {
+        const appsScriptRes = await this.uploadImageViaAppsScript(fileOrDataUrl, fileName);
+        if (appsScriptRes && appsScriptRes.fileId && !appsScriptRes.fileId.startsWith('drive-img-')) {
+          return appsScriptRes;
+        }
+      } catch (err: any) {
+        console.warn('Tải avatar qua Apps Script thất bại:', err);
+      }
+    }
+
+    // 3. Fallback lưu trữ cục bộ dạng Base64
+    let base64 = '';
+    if (typeof fileOrDataUrl === 'string') {
+      base64 = fileOrDataUrl;
+    } else {
+      base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(fileOrDataUrl);
+      });
+    }
+
+    return {
+      fileId: `local-avatar-${Date.now()}`,
+      name: fileName,
+      viewLink: '',
+      displayUrl: base64
+    };
   }
 
   /**

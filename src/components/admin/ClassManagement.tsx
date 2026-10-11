@@ -234,24 +234,29 @@ export const ClassManagement: React.FC = () => {
   };
 
   // Xác nhận xóa lớp
-  const confirmDeleteClass = () => {
+  const confirmDeleteClass = async () => {
     if (deleteClassId) {
       const target = classes.find((c) => c.id === deleteClassId);
       LMSStorageService.deleteClass(deleteClassId);
+      refreshData();
+      setDeleteClassId(null);
+
+      // Kích hoạt đồng bộ làm sạch Google Sheet trong nền
       GoogleSheetsService.triggerAutoSync('classes');
       GoogleSheetsService.triggerAutoSync('users');
 
       if (target) {
-        GoogleSheetsService.postToAppsScript({
-          action: 'deleteClass',
-          id: target.id,
-          name: target.name
-        }).catch(() => {});
-        showToast(`✓ Đã xóa Lớp ${target.name} và đồng bộ hệ thống Google Sheet!`);
+        try {
+          await GoogleSheetsService.postToAppsScript({
+            action: 'deleteClass',
+            id: target.id,
+            name: target.name
+          });
+        } catch (e) {
+          console.warn('Lỗi gọi deleteClass qua Apps Script:', e);
+        }
+        showToast(`✓ Đã xóa Lớp ${target.name} và đồng bộ làm sạch trên Google Sheet!`);
       }
-
-      refreshData();
-      setDeleteClassId(null);
     }
   };
 
@@ -1092,16 +1097,29 @@ export const ClassManagement: React.FC = () => {
       )}
 
       {/* Delete Class Confirmation Dialog */}
-      <ConfirmDialog
-        isOpen={Boolean(deleteClassId)}
-        title="Xóa lớp học"
-        message="Bạn có chắc chắn muốn xóa lớp học này khỏi hệ thống? Dữ liệu lớp học sẽ được cập nhật và đồng bộ trên Google Sheet."
-        confirmLabel="Xóa lớp học"
-        cancelLabel="Hủy bỏ"
-        isDanger={true}
-        onConfirm={confirmDeleteClass}
-        onCancel={() => setDeleteClassId(null)}
-      />
+      {(() => {
+        const targetDeleteClass = classes.find((c) => c.id === deleteClassId);
+        const enrolledCount = targetDeleteClass ? (actualStudentCountByClass[targetDeleteClass.id] || 0) : 0;
+        const deleteMsg = targetDeleteClass
+          ? `Bạn có chắc chắn muốn xóa Lớp ${targetDeleteClass.name} khỏi hệ thống? ${
+              enrolledCount > 0
+                ? `Lớp hiện có ${enrolledCount} học sinh đang theo học (các em sẽ được tự động chuyển về trạng thái Chưa phân lớp).`
+                : ''
+            } Dữ liệu lớp học sẽ được xóa trên LMS và làm sạch đồng bộ trên Google Sheet (sheet LopHoc).`
+          : 'Bạn có chắc chắn muốn xóa lớp học này?';
+        return (
+          <ConfirmDialog
+            isOpen={Boolean(deleteClassId)}
+            title={`Xóa lớp học ${targetDeleteClass ? targetDeleteClass.name : ''}`}
+            message={deleteMsg}
+            confirmLabel="Xóa lớp học"
+            cancelLabel="Hủy bỏ"
+            isDanger={true}
+            onConfirm={confirmDeleteClass}
+            onCancel={() => setDeleteClassId(null)}
+          />
+        );
+      })()}
 
       {/* Success Toast */}
       {syncSuccessToast && (

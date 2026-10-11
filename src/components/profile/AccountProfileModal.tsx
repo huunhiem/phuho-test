@@ -21,6 +21,7 @@ import { User } from '../../types';
 import { LMSStorageService } from '../../services/storage';
 import { GoogleSheetsService, getGoogleAccessToken } from '../../services/googleSheetsService';
 import { GoogleDriveService } from '../../services/googleDriveService';
+import { UserAvatar } from '../common/UserAvatar';
 
 interface AccountProfileModalProps {
   currentUser: User;
@@ -52,6 +53,7 @@ export const AccountProfileModal: React.FC<AccountProfileModalProps> = ({
   const [isSaving, setIsSaving] = useState(false);
   const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
   const [avatarUploadStatus, setAvatarUploadStatus] = useState<string>('');
+  const [driveViewLink, setDriveViewLink] = useState<string>('');
   const [errorMessage, setErrorMessage] = useState<string>('');
   const [successMessage, setSuccessMessage] = useState<string>('');
 
@@ -74,33 +76,39 @@ export const AccountProfileModal: React.FC<AccountProfileModalProps> = ({
     }
 
     setIsUploadingAvatar(true);
-    setAvatarUploadStatus('Đang xử lý ảnh đại diện...');
+    setAvatarUploadStatus('Đang đọc hình ảnh...');
     setErrorMessage('');
 
-    const reader = new FileReader();
-    reader.onload = async () => {
-      const dataUrl = reader.result as string;
-      setAvatarUrl(dataUrl);
+    // Đọc dataUrl để hiển thị preview ngay lập tức
+    const previewDataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
 
-      // Thử tải lên Google Drive nếu có kết nối
-      try {
-        const token = getGoogleAccessToken();
-        if (token) {
-          setAvatarUploadStatus('Đang tải ảnh đại diện lên Google Drive...');
-          const uploadRes = await GoogleDriveService.uploadImageToDrive(file, `avatar_${currentUser.username}_${Date.now()}.png`, token);
-          setAvatarUrl(uploadRes.displayUrl);
-          setAvatarUploadStatus('✓ Đã lưu ảnh đại diện lên Google Drive!');
+    setAvatarUrl(previewDataUrl);
+    setAvatarUploadStatus('Đang tải ảnh đại diện lên Google Drive...');
+
+    try {
+      const uploadRes = await GoogleDriveService.uploadAvatar(file, currentUser.username);
+      if (uploadRes && uploadRes.displayUrl) {
+        setAvatarUrl(uploadRes.displayUrl);
+        if (uploadRes.viewLink) {
+          setDriveViewLink(uploadRes.viewLink);
+          setAvatarUploadStatus('✓ Đã tải và lưu trữ ảnh đại diện lên Google Drive thành công!');
         } else {
-          setAvatarUploadStatus('✓ Đã đính kèm ảnh đại diện!');
+          setAvatarUploadStatus('✓ Đã lưu ảnh đại diện vào hệ thống!');
         }
-      } catch (err: any) {
-        console.warn('Lỗi tải avatar lên Drive:', err);
-        setAvatarUploadStatus('✓ Đã đính kèm ảnh đại diện!');
-      } finally {
-        setIsUploadingAvatar(false);
+      } else {
+        setAvatarUploadStatus('✓ Đã lưu ảnh đại diện vào hệ thống!');
       }
-    };
-    reader.readAsDataURL(file);
+    } catch (err: any) {
+      console.warn('Lỗi tải avatar lên Google Drive:', err);
+      setAvatarUploadStatus('✓ Đã lưu ảnh đại diện vào hệ thống (cục bộ)!');
+    } finally {
+      setIsUploadingAvatar(false);
+    }
   };
 
   const handleSaveInfo = async (e: React.FormEvent) => {
@@ -289,18 +297,13 @@ export const AccountProfileModal: React.FC<AccountProfileModalProps> = ({
               {/* Avatar Section */}
               <div className="flex items-center gap-4 p-4 rounded-xl bg-slate-50 border border-slate-200">
                 <div className="relative group shrink-0">
-                  {avatarUrl ? (
-                    <img
-                      src={avatarUrl}
-                      alt={currentUser.fullName}
-                      className="w-16 h-16 rounded-full object-cover border-2 border-indigo-200 shadow-xs"
-                      onError={() => setAvatarUrl('')}
-                    />
-                  ) : (
-                    <div className="w-16 h-16 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-xl border-2 border-indigo-200 shadow-xs">
-                      {currentUser.fullName.charAt(0).toUpperCase()}
-                    </div>
-                  )}
+                  <UserAvatar
+                    avatarUrl={avatarUrl}
+                    name={fullName || currentUser.fullName}
+                    role={currentUser.role}
+                    size="xl"
+                    className="cursor-pointer"
+                  />
 
                   <button
                     type="button"
@@ -318,9 +321,15 @@ export const AccountProfileModal: React.FC<AccountProfileModalProps> = ({
                     <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${roleMeta.bg}`}>
                       {roleMeta.label}
                     </span>
+                    {GoogleDriveService.extractDriveFileId(avatarUrl) && (
+                      <span className="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full font-medium inline-flex items-center gap-1">
+                        <UploadCloud className="w-3 h-3 text-emerald-600" />
+                        <span>Google Drive</span>
+                      </span>
+                    )}
                   </div>
                   <div className="text-xs text-slate-500 font-mono">@{currentUser.username}</div>
-                  <div className="flex items-center gap-2 pt-1">
+                  <div className="flex items-center gap-2 pt-1 flex-wrap">
                     <input
                       type="file"
                       ref={fileInputRef}
@@ -335,16 +344,31 @@ export const AccountProfileModal: React.FC<AccountProfileModalProps> = ({
                       className="px-2.5 py-1 text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg transition-colors cursor-pointer inline-flex items-center gap-1"
                     >
                       {isUploadingAvatar ? <Loader2 className="w-3 h-3 animate-spin" /> : <UploadCloud className="w-3 h-3" />}
-                      <span>Tải ảnh lên</span>
+                      <span>{isUploadingAvatar ? 'Đang tải lên Drive...' : 'Tải ảnh lên Google Drive'}</span>
                     </button>
                     {avatarUrl && (
                       <button
                         type="button"
-                        onClick={() => setAvatarUrl('')}
+                        onClick={() => {
+                          setAvatarUrl('');
+                          setDriveViewLink('');
+                          setAvatarUploadStatus('');
+                        }}
                         className="text-xs text-rose-600 hover:underline"
                       >
                         Gỡ ảnh
                       </button>
+                    )}
+                    {driveViewLink && (
+                      <a
+                        href={driveViewLink}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-xs text-indigo-600 hover:underline inline-flex items-center gap-0.5"
+                      >
+                        <ExternalLink className="w-3 h-3" />
+                        <span>Mở trên Drive</span>
+                      </a>
                     )}
                   </div>
                   {avatarUploadStatus && (
@@ -428,16 +452,27 @@ export const AccountProfileModal: React.FC<AccountProfileModalProps> = ({
                 </div>
 
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">
-                    Đường dẫn ảnh đại diện (URL)
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="font-semibold text-slate-700">
+                      Đường dẫn ảnh đại diện (Google Drive hoặc URL)
+                    </label>
+                    {GoogleDriveService.extractDriveFileId(avatarUrl) && (
+                      <span className="text-[10px] text-emerald-600 font-medium inline-flex items-center gap-1">
+                        <CheckCircle2 className="w-3 h-3" />
+                        <span>Link Google Drive hợp lệ (Tự động tối ưu hiển thị)</span>
+                      </span>
+                    )}
+                  </div>
                   <input
                     type="url"
                     value={avatarUrl}
                     onChange={(e) => setAvatarUrl(e.target.value)}
-                    placeholder="https://... hoặc tải ảnh trực tiếp ở trên"
+                    placeholder="https://drive.google.com/... hoặc tải ảnh lên ở trên"
                     className="w-full px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono text-[11px] text-slate-700"
                   />
+                  <p className="text-[10px] text-slate-400 mt-1">
+                    Hỗ trợ tải trực tiếp lên Google Drive hoặc dán đường dẫn chia sẻ từ Google Drive. Hệ thống tự động chuyển đổi định dạng và đồng bộ với Google Sheets.
+                  </p>
                 </div>
               </div>
 
