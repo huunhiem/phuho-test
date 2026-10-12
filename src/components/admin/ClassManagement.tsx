@@ -38,6 +38,7 @@ export const ClassManagement: React.FC = () => {
   const [classes, setClasses] = useState<ClassRoom[]>(() => LMSStorageService.getClasses());
   const [users, setUsers] = useState<User[]>(() => LMSStorageService.getUsers());
   const [selectedGrade, setSelectedGrade] = useState<number | 'ALL'>('ALL');
+  const [assignmentFilter, setAssignmentFilter] = useState<'ALL' | 'ASSIGNED' | 'UNASSIGNED'>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
   const [deleteClassId, setDeleteClassId] = useState<string | null>(null);
 
@@ -82,6 +83,28 @@ export const ClassManagement: React.FC = () => {
       }
     });
     const unsubSync = subscribeAutoSyncStatus((st) => setAutoSyncState(st));
+
+    // Tự động kiểm tra và cập nhật dữ liệu lớp từ Google Sheet LopHoc khi mở màn hình
+    const autoFetchLopHoc = async () => {
+      const sheetId = getSavedSheetId();
+      const token = getGoogleAccessToken();
+      const scriptUrl = getAppsScriptUrl();
+      if ((sheetId && token) || scriptUrl) {
+        try {
+          if (sheetId && token) {
+            await GoogleSheetsService.pullClassesFromSheet(sheetId, token);
+          } else {
+            await GoogleSheetsService.pullClassesFromAppsScript();
+          }
+          LMSStorageService.refreshTeacherAssignmentsFromClasses();
+          refreshData();
+        } catch (e) {
+          console.warn('Auto fetch classes error:', e);
+        }
+      }
+    };
+    autoFetchLopHoc();
+
     return () => {
       unsub();
       unsubSync();
@@ -107,15 +130,39 @@ export const ClassManagement: React.FC = () => {
     }
   });
 
-  // Lọc lớp theo khối và tìm kiếm
+  // Trích xuất số khối chuẩn xác từ lớp học (hỗ trợ cả "6/1", "Lớp 6/1", gradeId)
+  const getGradeFromClass = (cls: ClassRoom): number => {
+    if (cls.gradeId) {
+      const match = cls.gradeId.match(/(\d+)/);
+      if (match) return parseInt(match[1], 10);
+    }
+    const clean = cls.name.replace(/^(lớp|lop)\s+/i, '').trim();
+    const match = clean.match(/^(\d+)/);
+    if (match) return parseInt(match[1], 10);
+    const anyDigit = clean.match(/(\d+)/);
+    return anyDigit ? parseInt(anyDigit[1], 10) : 6;
+  };
+
+  // Lọc lớp theo khối, phân công, và tìm kiếm
   const filteredClasses = classes.filter((cls) => {
     // Lọc theo khối
     if (selectedGrade !== 'ALL') {
-      const gNum = parseInt(cls.name.split('/')[0] || cls.name.replace(/[^0-9]/g, '').charAt(0), 10);
-      if (gNum !== selectedGrade && !cls.name.startsWith(`${selectedGrade}/`)) {
+      const gNum = getGradeFromClass(cls);
+      if (gNum !== selectedGrade) {
         return false;
       }
     }
+
+    // Lọc theo trạng thái phân công
+    const isAssigned =
+      Boolean(cls.subjectTeacherName) ||
+      Boolean(cls.homeroomTeacherName) ||
+      (cls.assignedTeacherIds && cls.assignedTeacherIds.length > 0) ||
+      teachers.some((t) => t.assignedClassIds?.includes(cls.id) || (cls.subjectTeacherName && LMSStorageService.isTeacherNameMatch(cls.subjectTeacherName, t)));
+
+    if (assignmentFilter === 'ASSIGNED' && !isAssigned) return false;
+    if (assignmentFilter === 'UNASSIGNED' && isAssigned) return false;
+
     // Lọc theo từ khóa tìm kiếm
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
@@ -386,8 +433,28 @@ export const ClassManagement: React.FC = () => {
       const token = getGoogleAccessToken();
       let count = 0;
 
+      // 1. Kéo trước danh sách tài khoản nếu có để đảm bảo có thông tin Giáo viên đối chiếu
+      try {
+        if (sheetId && token) {
+          await GoogleSheetsService.pullAccountsFromSheet(sheetId, token);
+        } else {
+          await GoogleSheetsService.pullAccountsFromAppsScript();
+        }
+      } catch {}
+
+      // 2. Kéo danh sách lớp học và phân công từ sheet LopHoc
       if (sheetId && token) {
-        count = await GoogleSheetsService.pullClassesFromSheet(sheetId, token);
+        try {
+          count = await GoogleSheetsService.pullClassesFromSheet(sheetId, token);
+        } catch (oauthErr) {
+          console.warn('Lỗi kéo từ OAuth, thử lại qua Apps Script:', oauthErr);
+          const res = await GoogleSheetsService.pullClassesFromAppsScript();
+          if (res.success) {
+            count = res.count;
+          } else {
+            throw oauthErr;
+          }
+        }
       } else {
         const res = await GoogleSheetsService.pullClassesFromAppsScript();
         if (res.success) {
@@ -397,9 +464,12 @@ export const ClassManagement: React.FC = () => {
         }
       }
 
+      // 3. Liên kết hai chiều phân công giáo viên và cập nhật giao diện
+      LMSStorageService.refreshTeacherAssignmentsFromClasses();
       refreshData();
+
       setSyncMessage(`✓ Đã nạp thành công ${count} lớp học và phân công từ sheet LopHoc về giao diện!`);
-      showToast(`✓ Đã lấy thành công ${count} lớp học từ Sheet LopHoc hiển thị ở giao diện!`);
+      showToast(`✓ Đã lấy thành công ${count} lớp học và phân công từ Sheet LopHoc hiển thị ở giao diện!`);
     } catch (err: any) {
       setSyncMessage(`Lỗi tải từ Google Sheet: ${err.message || String(err)}`);
     } finally {
@@ -562,7 +632,7 @@ export const ClassManagement: React.FC = () => {
 
           {[6, 7, 8, 9].map((g) => {
             const isActive = selectedGrade === g;
-            const count = classes.filter((c) => c.name.startsWith(`${g}/`)).length;
+            const count = classes.filter((c) => getGradeFromClass(c) === g).length;
             return (
               <button
                 key={g}
@@ -587,16 +657,60 @@ export const ClassManagement: React.FC = () => {
           })}
         </div>
 
-        {/* Search */}
-        <div className="relative w-full sm:w-64">
-          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Tìm theo lớp, GVCN, GV bộ môn..."
-            className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
-          />
+        {/* Assignment Filter & Search */}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="inline-flex items-center p-0.5 bg-slate-100 rounded-lg border border-slate-200 text-xs">
+            <button
+              type="button"
+              onClick={() => setAssignmentFilter('ALL')}
+              className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors ${
+                assignmentFilter === 'ALL'
+                  ? 'bg-white text-indigo-700 shadow-2xs font-semibold'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Tất cả
+            </button>
+            <button
+              type="button"
+              onClick={() => setAssignmentFilter('ASSIGNED')}
+              className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors flex items-center gap-1 ${
+                assignmentFilter === 'ASSIGNED'
+                  ? 'bg-white text-emerald-700 shadow-2xs font-semibold'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <span>Đã phân công</span>
+              <span className="text-[10px] bg-emerald-100 text-emerald-800 px-1.5 py-0.2 rounded-full font-bold">
+                {assignedClassesCount}
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setAssignmentFilter('UNASSIGNED')}
+              className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors flex items-center gap-1 ${
+                assignmentFilter === 'UNASSIGNED'
+                  ? 'bg-white text-amber-700 shadow-2xs font-semibold'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <span>Chưa phân công</span>
+              <span className="text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.2 rounded-full font-bold">
+                {classes.length - assignedClassesCount}
+              </span>
+            </button>
+          </div>
+
+          <div className="relative w-full sm:w-56">
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Tìm lớp, GVCN, GV bộ môn..."
+              className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+            />
+          </div>
         </div>
       </div>
 
@@ -623,7 +737,7 @@ export const ClassManagement: React.FC = () => {
         ) : (
           filteredClasses.map((cls) => {
             const actualCount = actualStudentCountByClass[cls.id] || 0;
-            const gNum = cls.name.split('/')[0] || '6';
+            const gNum = getGradeFromClass(cls);
 
             // Danh sách giáo viên phụ trách lớp này (đối chiếu ID hoặc đối chiếu tên từ Sheet LopHoc)
             const assignedTeachersForThisClass = teachers.filter((t) => {
@@ -632,17 +746,8 @@ export const ClassManagement: React.FC = () => {
                 cls.assignedTeacherIds?.includes(t.id) ||
                 cls.subjectTeacherId === t.id;
               if (isMatchId) return true;
-              if (cls.subjectTeacherName) {
-                const sName = cls.subjectTeacherName.toLowerCase().trim();
-                const tName = (t.fullName || '').toLowerCase().trim();
-                const tUser = (t.username || '').toLowerCase().trim();
-                const tCode = (t.teacherCode || '').toLowerCase().trim();
-                return (
-                  sName.includes(tName) ||
-                  (tName && tName.includes(sName)) ||
-                  sName.includes(tUser) ||
-                  (tCode && sName.includes(tCode))
-                );
+              if (cls.subjectTeacherName && LMSStorageService.isTeacherNameMatch(cls.subjectTeacherName, t)) {
+                return true;
               }
               return false;
             });
@@ -735,14 +840,16 @@ export const ClassManagement: React.FC = () => {
                             {assignedTeachersForThisClass.map((t) => (
                               <span
                                 key={t.id}
-                                className="text-[11px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-100 px-2 py-0.5 rounded"
+                                className="text-[11px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-100 px-2 py-0.5 rounded flex items-center gap-1"
                               >
+                                <UserCheck className="w-3 h-3 text-indigo-600" />
                                 {t.fullName}
                               </span>
                             ))}
                           </div>
                         ) : cls.subjectTeacherName ? (
-                          <span className="text-[11px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-100 px-2 py-0.5 rounded">
+                          <span className="text-[11px] font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200 px-2 py-0.5 rounded inline-flex items-center gap-1" title="Phân công từ Sheet LopHoc">
+                            <UserCheck className="w-3 h-3 text-emerald-600" />
                             {cls.subjectTeacherName}
                           </span>
                         ) : (

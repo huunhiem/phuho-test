@@ -530,7 +530,7 @@ export class GoogleSheetsService {
   private static verifiedSpreadsheetIds: Set<string> = new Set();
 
   /**
-   * Tạo một Google Spreadsheet mới làm Database cho LMS với đầy đủ 7 sheet quản lý
+   * Tạo một Google Spreadsheet mới làm Database cho LMS với đầy đủ toàn bộ các sheet quản lý (9 Sheet CSDL)
    */
   static async createLMSDatabaseSheet(accessToken: string): Promise<{
     spreadsheetId: string;
@@ -1056,12 +1056,17 @@ export class GoogleSheetsService {
       updates.push(
         { range: 'TaiKhoan!A1', values: this.buildTaiKhoanRows() },
         { range: 'HocSinh!A1', values: this.buildHocSinhRows() },
-        { range: 'GiaoVien!A1', values: this.buildGiaoVienRows() }
+        { range: 'GiaoVien!A1', values: this.buildGiaoVienRows() },
+        { range: 'LopHoc!A1', values: this.buildLopHocRows() }
       );
     }
 
     if (entity === 'classes' || entity === 'all') {
-      updates.push({ range: 'LopHoc!A1', values: this.buildLopHocRows() });
+      updates.push(
+        { range: 'LopHoc!A1', values: this.buildLopHocRows() },
+        { range: 'GiaoVien!A1', values: this.buildGiaoVienRows() },
+        { range: 'TaiKhoan!A1', values: this.buildTaiKhoanRows() }
+      );
     }
 
     if (entity === 'lessons' || entity === 'all') {
@@ -1131,6 +1136,23 @@ export class GoogleSheetsService {
   }
 
   /**
+   * Tổng hợp toàn bộ dữ liệu 9 Sheet CSDL của trường THCS Phú Hồ
+   */
+  static buildAllSheetsData(): { name: string; rows: any[][] }[] {
+    return [
+      { name: 'TaiKhoan', rows: this.buildTaiKhoanRows() },
+      { name: 'HocSinh', rows: this.buildHocSinhRows() },
+      { name: 'GiaoVien', rows: this.buildGiaoVienRows() },
+      { name: 'LopHoc', rows: this.buildLopHocRows() },
+      { name: 'TenBaiHoc', rows: this.buildTenBaiHocRows() },
+      { name: 'CauHoi', rows: this.buildCauHoiRows() },
+      { name: 'DeThi', rows: this.buildDeThiRows() },
+      { name: 'GiaoDe', rows: this.buildGiaoDeRows() },
+      { name: 'BangDiem', rows: this.buildBangDiemRows() }
+    ];
+  }
+
+  /**
    * TỰ ĐỘNG CẬP NHẬT GOOGLE SHEET TRONG NỀN (BACKGROUND AUTO-SYNC)
    * Được gọi tự động mỗi khi thêm/sửa/xóa Lớp, Học sinh, Người dùng, Đề thi, Giao bài,...
    * Không cần người dùng bấm đồng bộ thủ công!
@@ -1194,32 +1216,43 @@ export class GoogleSheetsService {
 
         // Tự động đẩy dữ liệu lên Google Apps Script Web App nếu có cấu hình
         if (scriptUrl) {
-          // Đồng bộ nhanh toàn bộ các sheet qua payload batch
-          const sheetsToPush: { name: string; rows: any[][] }[] = [];
-          if (entitiesToSync.includes('users') || entitiesToSync.includes('all')) {
-            sheetsToPush.push(
-              { name: 'TaiKhoan', rows: this.buildTaiKhoanRows() },
-              { name: 'HocSinh', rows: this.buildHocSinhRows() },
-              { name: 'GiaoVien', rows: this.buildGiaoVienRows() }
-            );
-          }
-          if (entitiesToSync.includes('classes') || entitiesToSync.includes('all')) {
-            sheetsToPush.push({ name: 'LopHoc', rows: this.buildLopHocRows() });
-          }
-          if (entitiesToSync.includes('lessons') || entitiesToSync.includes('all')) {
-            sheetsToPush.push({ name: 'TenBaiHoc', rows: this.buildTenBaiHocRows() });
-          }
-          if (entitiesToSync.includes('questions') || entitiesToSync.includes('all')) {
-            sheetsToPush.push({ name: 'CauHoi', rows: this.buildCauHoiRows() });
-          }
-          if (entitiesToSync.includes('tests') || entitiesToSync.includes('all')) {
-            sheetsToPush.push({ name: 'DeThi', rows: this.buildDeThiRows() });
-          }
-          if (entitiesToSync.includes('assignments') || entitiesToSync.includes('all')) {
-            sheetsToPush.push({ name: 'GiaoDe', rows: this.buildGiaoDeRows() });
-          }
-          if (entitiesToSync.includes('submissions') || entitiesToSync.includes('all')) {
-            sheetsToPush.push({ name: 'BangDiem', rows: this.buildBangDiemRows() });
+          // Luôn đồng bộ toàn bộ các sheet có liên quan để bảo toàn tính toàn vẹn CSDL
+          let sheetsToPush: { name: string; rows: any[][] }[] = [];
+          const hasAll = entitiesToSync.includes('all');
+
+          if (hasAll || entitiesToSync.length >= 2) {
+            sheetsToPush = this.buildAllSheetsData();
+          } else {
+            if (entitiesToSync.includes('users')) {
+              sheetsToPush.push(
+                { name: 'TaiKhoan', rows: this.buildTaiKhoanRows() },
+                { name: 'HocSinh', rows: this.buildHocSinhRows() },
+                { name: 'GiaoVien', rows: this.buildGiaoVienRows() },
+                { name: 'LopHoc', rows: this.buildLopHocRows() }
+              );
+            }
+            if (entitiesToSync.includes('classes')) {
+              sheetsToPush.push(
+                { name: 'LopHoc', rows: this.buildLopHocRows() },
+                { name: 'GiaoVien', rows: this.buildGiaoVienRows() },
+                { name: 'TaiKhoan', rows: this.buildTaiKhoanRows() }
+              );
+            }
+            if (entitiesToSync.includes('lessons')) {
+              sheetsToPush.push({ name: 'TenBaiHoc', rows: this.buildTenBaiHocRows() });
+            }
+            if (entitiesToSync.includes('questions')) {
+              sheetsToPush.push({ name: 'CauHoi', rows: this.buildCauHoiRows() });
+            }
+            if (entitiesToSync.includes('tests')) {
+              sheetsToPush.push({ name: 'DeThi', rows: this.buildDeThiRows() });
+            }
+            if (entitiesToSync.includes('assignments')) {
+              sheetsToPush.push({ name: 'GiaoDe', rows: this.buildGiaoDeRows() });
+            }
+            if (entitiesToSync.includes('submissions')) {
+              sheetsToPush.push({ name: 'BangDiem', rows: this.buildBangDiemRows() });
+            }
           }
 
           if (sheetsToPush.length > 0) {
@@ -1237,7 +1270,7 @@ export class GoogleSheetsService {
         notifyAutoSyncListeners({
           status: 'synced',
           lastSyncedTime: now,
-          entity: entitiesToSync.join(', ')
+          entity: entitiesToSync.includes('all') ? 'Toàn bộ CSDL Google Sheet (9 Sheet)' : entitiesToSync.join(', ')
         });
       } catch (err: any) {
         console.warn('Lỗi tự động đồng bộ Google Sheet:', err);
@@ -1498,14 +1531,16 @@ export class GoogleSheetsService {
   }
 
   /**
-   * Tải danh sách Khối & Lớp học và phân công từ sheet LopHoc trên Google Sheet về LMS
+   * Phân tích và trích xuất dữ liệu lớp học & phân công giáo viên từ sheet LopHoc
+   * Tương thích linh hoạt với mọi bố cục bảng tính (có hoặc không có header, có hoặc không có cột ID, tự động sửa lỗi ngày tháng của Google Sheet)
    */
-  static async pullClassesFromSheet(
-    spreadsheetId: string,
-    accessToken: string
-  ): Promise<number> {
-    const rows = await this.readSheetValues(spreadsheetId, 'LopHoc!A2:F', accessToken);
-    if (!rows || rows.length === 0) return 0;
+  static parseLopHocRows(rows: any[][]): {
+    importedClasses: ClassRoom[];
+    teacherAssignments: Record<string, string[]>;
+  } {
+    if (!rows || rows.length === 0) {
+      return { importedClasses: [], teacherAssignments: {} };
+    }
 
     const users = LMSStorageService.getUsers();
     const existingClasses = LMSStorageService.getClasses();
@@ -1513,68 +1548,255 @@ export class GoogleSheetsService {
     const importedClasses: ClassRoom[] = [];
     const teacherAssignments: Record<string, string[]> = {};
 
-    for (let i = 0; i < rows.length; i++) {
-      const row = rows[i];
-      if (!row || (!row[0] && !row[1])) continue;
-
-      let name = String(row[1] || row[0] || '6/1').trim();
-      // Bỏ qua dòng tiêu đề nếu có
-      if (name.toLowerCase() === 'tên lớp' || name.toLowerCase() === 'lớp') continue;
-
-      if (name.includes('T') && name.includes('-')) {
-        const d = new Date(name);
+    const normalizeClassName = (raw: any): string => {
+      if (!raw) return '';
+      if (raw instanceof Date) {
+        const m = raw.getMonth() + 1;
+        const d = raw.getDate();
+        if (m >= 6 && m <= 9 && d >= 1 && d <= 15) return `${m}/${d}`;
+        if (d >= 6 && d <= 9 && m >= 1 && m <= 15) return `${d}/${m}`;
+        return `${m}/${d}`;
+      }
+      let s = String(raw).trim();
+      if (s.includes('-') && (s.includes('T') || s.length === 10)) {
+        const d = new Date(s);
         if (!isNaN(d.getTime())) {
-          name = `${d.getMonth() + 1}/${d.getDate()}`;
+          const m = d.getMonth() + 1;
+          const dt = d.getDate();
+          if (m >= 6 && m <= 9 && dt >= 1 && dt <= 15) return `${m}/${dt}`;
+          if (dt >= 6 && dt <= 9 && m >= 1 && m <= 15) return `${dt}/${m}`;
+        }
+      }
+      const dateParts = s.match(/^(\d{1,2})\/(\d{1,2})(?:\/\d{2,4})?$/);
+      if (dateParts) {
+        const p1 = parseInt(dateParts[1], 10);
+        const p2 = parseInt(dateParts[2], 10);
+        if (p1 >= 6 && p1 <= 9 && p2 >= 1 && p2 <= 15) return `${p1}/${p2}`;
+        if (p2 >= 6 && p2 <= 9 && p1 >= 1 && p1 <= 15) return `${p2}/${p1}`;
+      }
+      s = s.replace(/^(lớp|lop|khối|khoi)\s+/i, '').trim();
+      s = s.replace(/^([6-9])[\.\-]([0-9]{1,2})$/, '$1/$2');
+      return s;
+    };
+
+    const cleanTeacherName = (val: string): string => {
+      return (val || '')
+        .toLowerCase()
+        .replace(/^(thầy|cô|gv|giáo viên|thầy\/cô)\s+/i, '')
+        .trim();
+    };
+
+    let headerRowIdx = -1;
+    let colId = -1;
+    let colName = -1;
+    let colGrade = -1;
+    let colCount = -1;
+    let colHomeroom = -1;
+    let colSubject = -1;
+
+    for (let rIdx = 0; rIdx < Math.min(3, rows.length); rIdx++) {
+      const r = rows[rIdx];
+      if (!Array.isArray(r)) continue;
+      const joined = r.map((c) => String(c || '').toLowerCase()).join(' ');
+      if (
+        joined.includes('lớp') ||
+        joined.includes('khối') ||
+        joined.includes('chủ nhiệm') ||
+        joined.includes('phân công') ||
+        joined.includes('giáo viên')
+      ) {
+        headerRowIdx = rIdx;
+        r.forEach((cell, cIdx) => {
+          const h = String(cell || '').trim().toLowerCase();
+          if (/^(id|stt|mã\s*lớp|mã)$/i.test(h)) {
+            colId = cIdx;
+          } else if (
+            /^(tên\s*lớp|lớp|class|lớp\s*học)$/i.test(h) ||
+            (h.includes('lớp') && !h.includes('khối') && !h.includes('chủ nhiệm') && !h.includes('phân công') && !h.includes('giáo viên'))
+          ) {
+            if (colName === -1) colName = cIdx;
+          } else if (
+            /^(khối|khối\s*lớp|grade)$/i.test(h) ||
+            (h.includes('khối') && !h.includes('lớp'))
+          ) {
+            if (colGrade === -1) colGrade = cIdx;
+          } else if (
+            /^(sĩ\s*số|số\s*hs|học\s*sinh|số\s*lượng|siso)$/i.test(h) ||
+            h.includes('sĩ số') ||
+            h.includes('sĩ-số')
+          ) {
+            if (colCount === -1) colCount = cIdx;
+          } else if (
+            /^(gvcn|giáo\s*viên\s*chủ\s*nhiệm|chủ\s*nhiệm|homeroom)$/i.test(h) ||
+            h.includes('chủ nhiệm') ||
+            h.includes('gvcn')
+          ) {
+            if (colHomeroom === -1) colHomeroom = cIdx;
+          } else if (
+            h.includes('phân công') ||
+            h.includes('gvbm') ||
+            h.includes('bộ môn') ||
+            h.includes('tin học') ||
+            h.includes('giảng dạy') ||
+            h.includes('phụ trách') ||
+            (h.includes('giáo viên') && !h.includes('chủ nhiệm')) ||
+            (h.includes('gv') && !h.includes('gvcn') && !h.includes('chủ nhiệm'))
+          ) {
+            if (colSubject === -1) colSubject = cIdx;
+          }
+        });
+        break;
+      }
+    }
+
+    const dataRows = headerRowIdx >= 0 ? rows.slice(headerRowIdx + 1) : rows;
+
+    for (let i = 0; i < dataRows.length; i++) {
+      const row = dataRows[i];
+      if (!row || row.length === 0) continue;
+
+      let rawName = '';
+      let rawId = '';
+      let rawGrade = '';
+      let rawStudentCount = '';
+      let homeroomTeacherName = '';
+      let subjectTeacherName = '';
+
+      if (colName >= 0 && row[colName] !== undefined) {
+        rawName = String(row[colName]);
+      }
+      if (colId >= 0 && row[colId] !== undefined) {
+        rawId = String(row[colId]);
+      }
+      if (colGrade >= 0 && row[colGrade] !== undefined) {
+        rawGrade = String(row[colGrade]);
+      }
+      if (colCount >= 0 && row[colCount] !== undefined) {
+        rawStudentCount = String(row[colCount]);
+      }
+      if (colHomeroom >= 0 && row[colHomeroom] !== undefined) {
+        homeroomTeacherName = String(row[colHomeroom]);
+      }
+      if (colSubject >= 0 && row[colSubject] !== undefined) {
+        subjectTeacherName = String(row[colSubject]);
+      }
+
+      if (!rawName) {
+        for (let c = 0; c < row.length; c++) {
+          const val = String(row[c] || '').trim();
+          if (!val) continue;
+          if (/^(lớp\s*)?([6-9])[\/\.\-A-Za-z0-9]+/i.test(val)) {
+            rawName = val;
+            break;
+          }
+        }
+        if (!rawName) {
+          rawName = String(row[1] || row[0] || '').trim();
         }
       }
 
-      // Xác định ID lớp ổn định
-      const existingClass = existingClasses.find((c) => c.name.toLowerCase() === name.toLowerCase());
+      const cleanName = normalizeClassName(rawName);
+      if (!cleanName || cleanName.toLowerCase() === 'tên lớp' || cleanName.toLowerCase() === 'lớp') {
+        continue;
+      }
+
+      let gradeNum = 6;
+      if (rawGrade) {
+        gradeNum = parseInt(String(rawGrade).replace(/[^0-9]/g, ''), 10) || 6;
+      } else {
+        const matchG = cleanName.match(/^([6-9])/);
+        gradeNum = matchG ? parseInt(matchG[1], 10) : 6;
+      }
+
+      let studentCount = 35;
+      if (rawStudentCount) {
+        studentCount = parseInt(String(rawStudentCount).replace(/[^0-9]/g, ''), 10) || 35;
+      } else {
+        for (let c = 0; c < row.length; c++) {
+          const num = parseInt(String(row[c] || '').replace(/[^0-9]/g, ''), 10);
+          if (!isNaN(num) && num >= 15 && num <= 60 && !String(row[c]).includes('/')) {
+            studentCount = num;
+            break;
+          }
+        }
+      }
+
+      // Quét tự động cột phân công GV bộ môn Tin học nếu chưa nhận diện được
+      if (!subjectTeacherName) {
+        for (let c = 0; c < row.length; c++) {
+          if (c === colName || c === colId || c === colGrade || c === colCount || c === colHomeroom) continue;
+          const val = String(row[c] || '').trim();
+          if (
+            val &&
+            val.length >= 2 &&
+            isNaN(Number(val)) &&
+            !val.includes('/') &&
+            !val.toLowerCase().startsWith('khối') &&
+            !val.toLowerCase().startsWith('lớp')
+          ) {
+            subjectTeacherName = val;
+            break;
+          }
+        }
+      }
+
+      // Quét tự động cột GVCN nếu chưa nhận diện được
+      if (!homeroomTeacherName) {
+        for (let c = 0; c < row.length; c++) {
+          if (c === colName || c === colId || c === colGrade || c === colCount || c === colSubject) continue;
+          const val = String(row[c] || '').trim();
+          if (
+            val &&
+            val.length >= 2 &&
+            isNaN(Number(val)) &&
+            !val.includes('/') &&
+            !val.toLowerCase().startsWith('khối') &&
+            !val.toLowerCase().startsWith('lớp')
+          ) {
+            homeroomTeacherName = val;
+            break;
+          }
+        }
+      }
+
+      homeroomTeacherName = homeroomTeacherName.trim();
+      subjectTeacherName = subjectTeacherName.trim();
+
+      const existingClass = existingClasses.find(
+        (c) =>
+          c.name.toLowerCase() === cleanName.toLowerCase() ||
+          c.name.toLowerCase().replace(/^(lớp|lop)\s+/i, '') === cleanName.toLowerCase()
+      );
       let id = existingClass?.id;
       if (!id) {
-        const rawId = String(row[0] || '').trim();
         if (rawId && rawId.startsWith('cls-')) {
           id = rawId;
         } else {
-          id = `cls-${name.replace(/[^a-zA-Z0-9]/g, '-')}`;
+          id = `cls-${cleanName.replace(/[^a-zA-Z0-9]/g, '-')}`;
         }
       }
 
-      const rawGrade = String(row[2] || name.split('/')[0] || '6');
-      const gradeNum = parseInt(rawGrade.replace(/[^0-9]/g, ''), 10) || parseInt(name.split('/')[0], 10) || 6;
-      const studentCount = parseInt(String(row[3] || '35'), 10) || 35;
-      const homeroomTeacherName = String(row[4] || '').trim();
-      const subjectTeacherName = String(row[5] || '').trim();
-
-      const matchedHomeroom = staff.find((t) => {
-        const tf = (t.fullName || '').toLowerCase().trim();
-        const tu = (t.username || '').toLowerCase().trim();
-        const tc = (t.teacherCode || '').toLowerCase().trim();
-        const hn = homeroomTeacherName.toLowerCase().trim();
-        return tf === hn || tu === hn || (tc && tc === hn) || (hn && (hn.includes(tf) || tf.includes(hn)));
-      });
-
-      const assignedTeacherIds: string[] = [];
-      const teacherNames = subjectTeacherName.split(/[,;/+]/).map((s) => s.trim().toLowerCase()).filter(Boolean);
-      staff.forEach((t) => {
-        const tf = (t.fullName || '').toLowerCase().trim();
-        const tu = (t.username || '').toLowerCase().trim();
-        const tc = (t.teacherCode || '').toLowerCase().trim();
-        const isMatched = teacherNames.some((n) =>
-          tf === n || tu === n || (tc && tc === n) || tf.includes(n) || n.includes(tf) || tu.includes(n)
-        );
-        if (isMatched) {
-          if (!assignedTeacherIds.includes(t.id)) {
-            assignedTeacherIds.push(t.id);
-            if (!teacherAssignments[t.id]) teacherAssignments[t.id] = [];
-            teacherAssignments[t.id].push(id);
-          }
-        }
-      });
-
-      const matchedSubjectTeacher = assignedTeacherIds.length > 0
-        ? staff.find((t) => t.id === assignedTeacherIds[0])
+      // Đối chiếu giáo viên chủ nhiệm
+      const matchedHomeroom = homeroomTeacherName
+        ? staff.find((t) => LMSStorageService.isTeacherNameMatch(homeroomTeacherName, t))
         : undefined;
+
+      // Đối chiếu giáo viên bộ môn Tin học
+      const assignedTeacherIds: string[] = [];
+      if (subjectTeacherName) {
+        staff.forEach((t) => {
+          if (LMSStorageService.isTeacherNameMatch(subjectTeacherName, t)) {
+            if (!assignedTeacherIds.includes(t.id)) {
+              assignedTeacherIds.push(t.id);
+              if (!teacherAssignments[t.id]) teacherAssignments[t.id] = [];
+              teacherAssignments[t.id].push(id);
+            }
+          }
+        });
+      }
+
+      const matchedSubjectTeacher =
+        assignedTeacherIds.length > 0 ? staff.find((t) => t.id === assignedTeacherIds[0]) : undefined;
 
       if (matchedHomeroom && !assignedTeacherIds.includes(matchedHomeroom.id)) {
         assignedTeacherIds.push(matchedHomeroom.id);
@@ -1584,20 +1806,36 @@ export class GoogleSheetsService {
 
       importedClasses.push({
         id,
-        name,
+        name: cleanName,
         gradeId: `grade-${gradeNum}`,
         academicYearId: 'ay-2025-2026',
         homeroomTeacherId: matchedHomeroom?.id,
-        homeroomTeacherName: homeroomTeacherName || matchedHomeroom?.fullName,
+        homeroomTeacherName: homeroomTeacherName || matchedHomeroom?.fullName || '',
         subjectTeacherId: matchedSubjectTeacher?.id,
-        subjectTeacherName: subjectTeacherName || matchedSubjectTeacher?.fullName,
+        subjectTeacherName: subjectTeacherName || matchedSubjectTeacher?.fullName || '',
         assignedTeacherIds,
         studentCount
       });
     }
 
+    return { importedClasses, teacherAssignments };
+  }
+
+  /**
+   * Tải danh sách Khối & Lớp học và phân công từ sheet LopHoc trên Google Sheet về LMS
+   */
+  static async pullClassesFromSheet(
+    spreadsheetId: string,
+    accessToken: string
+  ): Promise<number> {
+    const rows = await this.readSheetValues(spreadsheetId, 'LopHoc!A1:Z', accessToken);
+    if (!rows || rows.length === 0) return 0;
+
+    const { importedClasses, teacherAssignments } = this.parseLopHocRows(rows);
+
     if (importedClasses.length > 0) {
       LMSStorageService.importClasses(importedClasses);
+      const users = LMSStorageService.getUsers();
       const currentLoggedIn = LMSStorageService.getCurrentUser();
       Object.entries(teacherAssignments).forEach(([tId, cIds]) => {
         const tUser = users.find((u) => u.id === tId);
@@ -1609,6 +1847,7 @@ export class GoogleSheetsService {
           }
         }
       });
+      LMSStorageService.refreshTeacherAssignmentsFromClasses();
       notifyChange('classes');
       notifyChange('users');
     }
@@ -1630,102 +1869,15 @@ export class GoogleSheetsService {
         return { success: false, count: 0, error: `Lỗi kết nối Apps Script: HTTP ${res.status}` };
       }
       const data = await res.json();
-      if (!Array.isArray(data) || data.length <= 1) {
+      if (!Array.isArray(data) || data.length === 0) {
         return { success: true, count: 0 };
       }
 
-      const rows = data.slice(1);
-      const users = LMSStorageService.getUsers();
-      const existingClasses = LMSStorageService.getClasses();
-      const staff = users.filter((u) => u.role !== 'STUDENT');
-      const importedClasses: ClassRoom[] = [];
-      const teacherAssignments: Record<string, string[]> = {};
-
-      for (let i = 0; i < rows.length; i++) {
-        const row = rows[i];
-        if (!row || (!row[0] && !row[1])) continue;
-
-        let name = String(row[1] || row[0] || '6/1').trim();
-        // Bỏ qua dòng tiêu đề nếu có
-        if (name.toLowerCase() === 'tên lớp' || name.toLowerCase() === 'lớp') continue;
-
-        if (name.includes('T') && name.includes('-')) {
-          const d = new Date(name);
-          if (!isNaN(d.getTime())) {
-            name = `${d.getMonth() + 1}/${d.getDate()}`;
-          }
-        }
-
-        // Xác định ID lớp ổn định
-        const existingClass = existingClasses.find((c) => c.name.toLowerCase() === name.toLowerCase());
-        let id = existingClass?.id;
-        if (!id) {
-          const rawId = String(row[0] || '').trim();
-          if (rawId && rawId.startsWith('cls-')) {
-            id = rawId;
-          } else {
-            id = `cls-${name.replace(/[^a-zA-Z0-9]/g, '-')}`;
-          }
-        }
-
-        const rawGrade = String(row[2] || name.split('/')[0] || '6');
-        const gradeNum = parseInt(rawGrade.replace(/[^0-9]/g, ''), 10) || parseInt(name.split('/')[0], 10) || 6;
-        const studentCount = parseInt(String(row[3] || '35'), 10) || 35;
-        const homeroom = String(row[4] || '').trim();
-        const subjectTeacher = String(row[5] || '').trim();
-
-        const matchedHomeroom = staff.find((t) => {
-          const tf = (t.fullName || '').toLowerCase().trim();
-          const tu = (t.username || '').toLowerCase().trim();
-          const tc = (t.teacherCode || '').toLowerCase().trim();
-          const hn = homeroom.toLowerCase().trim();
-          return tf === hn || tu === hn || (tc && tc === hn) || (hn && (hn.includes(tf) || tf.includes(hn)));
-        });
-
-        const assignedTeacherIds: string[] = [];
-        const teacherNames = subjectTeacher.split(/[,;/+]/).map((s) => s.trim().toLowerCase()).filter(Boolean);
-        staff.forEach((t) => {
-          const tf = (t.fullName || '').toLowerCase().trim();
-          const tu = (t.username || '').toLowerCase().trim();
-          const tc = (t.teacherCode || '').toLowerCase().trim();
-          const isMatched = teacherNames.some((n) =>
-            tf === n || tu === n || (tc && tc === n) || tf.includes(n) || n.includes(tf) || tu.includes(n)
-          );
-          if (isMatched) {
-            if (!assignedTeacherIds.includes(t.id)) {
-              assignedTeacherIds.push(t.id);
-              if (!teacherAssignments[t.id]) teacherAssignments[t.id] = [];
-              teacherAssignments[t.id].push(id);
-            }
-          }
-        });
-
-        const matchedSubjectTeacher = assignedTeacherIds.length > 0
-          ? staff.find((t) => t.id === assignedTeacherIds[0])
-          : undefined;
-
-        if (matchedHomeroom && !assignedTeacherIds.includes(matchedHomeroom.id)) {
-          assignedTeacherIds.push(matchedHomeroom.id);
-          if (!teacherAssignments[matchedHomeroom.id]) teacherAssignments[matchedHomeroom.id] = [];
-          teacherAssignments[matchedHomeroom.id].push(id);
-        }
-
-        importedClasses.push({
-          id,
-          name,
-          gradeId: `grade-${gradeNum}`,
-          academicYearId: 'ay-2025-2026',
-          homeroomTeacherId: matchedHomeroom?.id,
-          homeroomTeacherName: homeroom || matchedHomeroom?.fullName,
-          subjectTeacherId: matchedSubjectTeacher?.id,
-          subjectTeacherName: subjectTeacher || matchedSubjectTeacher?.fullName,
-          assignedTeacherIds,
-          studentCount
-        });
-      }
+      const { importedClasses, teacherAssignments } = this.parseLopHocRows(data);
 
       if (importedClasses.length > 0) {
         LMSStorageService.importClasses(importedClasses);
+        const users = LMSStorageService.getUsers();
         const currentLoggedIn = LMSStorageService.getCurrentUser();
         Object.entries(teacherAssignments).forEach(([tId, cIds]) => {
           const tUser = users.find((u) => u.id === tId);
@@ -1737,6 +1889,7 @@ export class GoogleSheetsService {
             }
           }
         });
+        LMSStorageService.refreshTeacherAssignmentsFromClasses();
         notifyChange('classes');
         notifyChange('users');
         return { success: true, count: importedClasses.length };
@@ -1960,7 +2113,85 @@ export class GoogleSheetsService {
   }
 
   /**
-   * Đồng bộ toàn bộ dữ liệu 7 sheet (Tài khoản, Lớp học, Phân công, Câu hỏi, Bài học, Đề thi, Giao đề)
+   * Tải Bảng điểm (BangDiem) từ Google Sheet qua Apps Script
+   */
+  static async pullSubmissionsFromAppsScript(): Promise<{ success: boolean; count: number; error?: string }> {
+    const scriptUrl = getAppsScriptUrl();
+    if (!scriptUrl) return { success: false, count: 0, error: 'Chưa có Apps Script URL' };
+    const sheetId = getSavedSheetId();
+    try {
+      const url = `${scriptUrl}?action=getSubmissions${sheetId ? `&sheetId=${encodeURIComponent(sheetId)}` : ''}`;
+      const res = await fetch(url);
+      if (!res.ok) return { success: false, count: 0, error: `HTTP ${res.status}` };
+      const data = await res.json();
+      if (!Array.isArray(data) || data.length <= 1) return { success: true, count: 0 };
+
+      const rows = data.slice(1);
+      const activeUsers = LMSStorageService.getUsers().filter((u) => u.status !== 'DELETED');
+      const activeStudentCodes = new Set(activeUsers.map((u) => u.studentCode).filter(Boolean));
+      const activeUserByName = new Map(activeUsers.map((u) => [u.fullName.toLowerCase(), u]));
+      const importedSubs: Submission[] = [];
+
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        if (!row || row.length < 5) continue;
+        const id = String(row[0] || `sub-gsheet-${Date.now()}-${i}`).trim();
+        const studentName = String(row[1] || 'Học sinh').trim();
+        if (studentName.toLowerCase() === 'họ tên học sinh') continue;
+
+        const studentCode = String(row[2] || '').trim();
+        const className = String(row[3] || '').trim();
+        const testTitle = String(row[4] || 'Bài kiểm tra').trim();
+        const variantCode = String(row[5] || '101').trim();
+        const score = parseFloat(String(row[6] || '0')) || 0;
+        const countPart = String(row[7] || '0/10').split('/');
+        const correctCount = parseInt(countPart[0], 10) || 0;
+        const totalQuestions = parseInt(countPart[1], 10) || 10;
+        const submittedAt = row[8] ? new Date(row[8]).toISOString() : new Date().toISOString();
+
+        const isStudentCodeActive = studentCode && activeStudentCodes.has(studentCode);
+        const matchedUser = isStudentCodeActive
+          ? activeUsers.find((u) => u.studentCode === studentCode)
+          : activeUserByName.get(studentName.toLowerCase());
+
+        const studentId = matchedUser?.id || `user-student-${studentCode || id}`;
+        const gradeNum = parseInt(String(className || '').replace(/[^0-9]/g, '').slice(0, 1), 10) || 6;
+
+        importedSubs.push({
+          id,
+          assignmentId: 'assign-sync',
+          testId: 'test-sync',
+          studentId,
+          studentName: matchedUser?.fullName || studentName,
+          studentCode: matchedUser?.studentCode || studentCode,
+          classId: matchedUser?.classId || '',
+          className: className || '8/7',
+          gradeLevel: gradeNum,
+          testTitle,
+          variantCode,
+          answers: {},
+          score,
+          maxScore: 10,
+          totalQuestions,
+          correctCount,
+          startedAt: submittedAt,
+          submittedAt,
+          timeSpentSeconds: 1800,
+          status: 'COMPLETED'
+        });
+      }
+
+      if (importedSubs.length > 0) {
+        LMSStorageService.importSubmissions(importedSubs);
+      }
+      return { success: true, count: importedSubs.length };
+    } catch (e: any) {
+      return { success: false, count: 0, error: e.message };
+    }
+  }
+
+  /**
+   * Đồng bộ toàn bộ dữ liệu toàn bộ các sheet (Tài khoản, Học sinh, Giáo viên, Lớp học, Phân công, Bài học, Câu hỏi, Đề thi, Giao đề, Bảng điểm)
    * Từ Google Sheet thông qua Apps Script
    */
   static async syncAllFromAppsScript(): Promise<{
@@ -1970,12 +2201,13 @@ export class GoogleSheetsService {
     lessons: number;
     tests: number;
     assignments: number;
+    submissions: number;
     success: boolean;
     error?: string;
   }> {
     const scriptUrl = getAppsScriptUrl();
     if (!scriptUrl) {
-      return { users: 0, classes: 0, questions: 0, lessons: 0, tests: 0, assignments: 0, success: false, error: 'Chưa có Apps Script URL' };
+      return { users: 0, classes: 0, questions: 0, lessons: 0, tests: 0, assignments: 0, submissions: 0, success: false, error: 'Chưa có Apps Script URL' };
     }
 
     notifyAutoSyncListeners({ status: 'syncing', entity: 'all' });
@@ -1985,6 +2217,7 @@ export class GoogleSheetsService {
     let lessonsCount = 0;
     let testsCount = 0;
     let assignmentsCount = 0;
+    let submissionsCount = 0;
 
     try {
       // 1. Tải danh sách Tài khoản trước
@@ -2011,10 +2244,17 @@ export class GoogleSheetsService {
       const aRes = await this.pullAssignmentsFromAppsScript();
       assignmentsCount = aRes.count;
 
+      // 7. Tải Bảng điểm bài làm
+      const subRes = await this.pullSubmissionsFromAppsScript();
+      submissionsCount = subRes.count;
+
+      // Đảm bảo quét và liên kết hai chiều mọi phân công lớp học cho giáo viên
+      LMSStorageService.refreshTeacherAssignmentsFromClasses();
+
       notifyAutoSyncListeners({
         status: 'synced',
         lastSyncedTime: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
-        entity: 'Google Sheet (Đầy đủ 7 sheet)'
+        entity: 'Toàn bộ CSDL Google Sheet (9 Sheet)'
       });
 
       return {
@@ -2024,6 +2264,7 @@ export class GoogleSheetsService {
         lessons: lessonsCount,
         tests: testsCount,
         assignments: assignmentsCount,
+        submissions: submissionsCount,
         success: true
       };
     } catch (err: any) {
@@ -2035,6 +2276,7 @@ export class GoogleSheetsService {
         lessons: lessonsCount,
         tests: testsCount,
         assignments: assignmentsCount,
+        submissions: submissionsCount,
         success: false,
         error: err.message
       };
@@ -2330,7 +2572,7 @@ export class GoogleSheetsService {
         supportsSaveQuestion,
         message: `Kết nối thành công! Đã nạp ${qCount} câu hỏi từ Google Sheet (sheet CauHoi).${
           supportsSaveQuestion
-            ? ' Hỗ trợ đầy đủ quyền đọc/ghi 7 sheet.'
+            ? ' Hỗ trợ đầy đủ quyền đọc/ghi toàn bộ các sheet CSDL (9 sheet).'
             : ' (Lưu ý: Apps Script đang chạy phiên bản cũ, vui lòng cập nhật phiên bản mới để tự động ghi câu hỏi).'
         }`
       };
@@ -2416,7 +2658,7 @@ export class GoogleSheetsService {
   }
 
   /**
-   * Đẩy toàn bộ dữ liệu 7 sheet lên Google Sheet và sao lưu Google Drive thông qua Apps Script
+   * Đẩy toàn bộ dữ liệu toàn bộ CSDL (9 Sheet) lên Google Sheet và sao lưu Google Drive thông qua Apps Script
    * Hoạt động 100% độc lập, không yêu cầu đăng nhập Google OAuth
    */
   static async pushAllDataViaAppsScript(spreadsheetId?: string): Promise<{ success: boolean; message: string }> {

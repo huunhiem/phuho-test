@@ -21,7 +21,9 @@ import {
   Eye,
   Check,
   HardDrive,
-  Globe
+  Globe,
+  BookOpen,
+  Send
 } from 'lucide-react';
 import {
   initGoogleAuth,
@@ -154,7 +156,7 @@ export const GoogleSheetManager: React.FC<GoogleSheetManagerProps> = ({ currentU
     }
 
     setIsSyncing(true);
-    setSyncStatus('Đang khởi tạo Google Spreadsheet Database trên Google Drive với 7 sheet quản lý...');
+    setSyncStatus('Đang khởi tạo Google Spreadsheet Database trên Google Drive với toàn bộ 9 sheet quản lý...');
     try {
       const result = await GoogleSheetsService.createLMSDatabaseSheet(accessToken);
       setSheetId(result.spreadsheetId);
@@ -255,12 +257,37 @@ export const GoogleSheetManager: React.FC<GoogleSheetManagerProps> = ({ currentU
 
   const loadPreviewData = async (tabName: string) => {
     setPreviewTab(tabName);
-    if (!accessToken || !sheetId.trim()) return;
-
     setIsLoadingPreview(true);
     try {
-      const rows = await GoogleSheetsService.readSheetValues(sheetId, `${tabName}!A1:L30`, accessToken);
-      setSheetRows(rows);
+      if (accessToken && sheetId.trim()) {
+        const rows = await GoogleSheetsService.readSheetValues(sheetId, `${tabName}!A1:Z50`, accessToken);
+        setSheetRows(rows);
+      } else {
+        // Fallback: đọc qua Apps Script nếu chưa kết nối Google OAuth
+        const scriptUrl = getAppsScriptUrl();
+        if (scriptUrl) {
+          let actionName = 'getAccounts';
+          if (tabName === 'TaiKhoan') actionName = 'getAccounts';
+          else if (tabName === 'HocSinh') actionName = 'getStudents';
+          else if (tabName === 'GiaoVien') actionName = 'getTeachers';
+          else if (tabName === 'LopHoc') actionName = 'getClasses';
+          else if (tabName === 'TenBaiHoc') actionName = 'getLessons';
+          else if (tabName === 'CauHoi') actionName = 'getQuestions';
+          else if (tabName === 'DeThi') actionName = 'getTests';
+          else if (tabName === 'GiaoDe') actionName = 'getAssignments';
+          else if (tabName === 'BangDiem') actionName = 'getSubmissions';
+
+          const res = await fetch(`${scriptUrl}?action=${actionName}${sheetId ? `&sheetId=${encodeURIComponent(sheetId)}` : ''}`);
+          if (res.ok) {
+            const data = await res.json();
+            if (Array.isArray(data) && data.length > 0) {
+              setSheetRows(data.slice(0, 50));
+            } else {
+              setSheetRows([]);
+            }
+          }
+        }
+      }
     } catch (e) {
       setSheetRows([]);
     } finally {
@@ -427,7 +454,7 @@ function doGet(e) {
   
   // 1. Lấy toàn bộ tài khoản & mật khẩu
   if (action === 'getAccounts' || action === 'getUsers') {
-    var sheet = ss.getSheetByName('TaiKhoan');
+    var sheet = ss.getSheetByName('TaiKhoan') || ss.getSheetByName('Tài khoản') || ss.getSheetByName('TAIKHOAN') || ss.getSheetByName('Users');
     if (!sheet) return jsonResponse({ error: 'Chưa có sheet TaiKhoan' });
     var data = sheet.getDataRange().getValues();
     return jsonResponse(data);
@@ -435,7 +462,7 @@ function doGet(e) {
   
   // 2. Lấy danh sách học sinh
   if (action === 'getStudents') {
-    var sheet = ss.getSheetByName('HocSinh');
+    var sheet = ss.getSheetByName('HocSinh') || ss.getSheetByName('Học sinh') || ss.getSheetByName('HOCSINH') || ss.getSheetByName('Students');
     if (!sheet) return jsonResponse({ error: 'Chưa có sheet HocSinh' });
     var data = sheet.getDataRange().getValues();
     return jsonResponse(data);
@@ -443,7 +470,7 @@ function doGet(e) {
   
   // 3. Lấy ngân hàng câu hỏi
   if (action === 'getQuestions') {
-    var sheet = ss.getSheetByName('CauHoi');
+    var sheet = ss.getSheetByName('CauHoi') || ss.getSheetByName('Câu hỏi') || ss.getSheetByName('CAUHOI') || ss.getSheetByName('Questions');
     if (!sheet) {
       // Tự động khởi tạo sheet CauHoi nếu chưa có
       sheet = ss.insertSheet('CauHoi');
@@ -461,7 +488,7 @@ function doGet(e) {
   
   // 4. Lấy danh sách lớp học
   if (action === 'getClasses' || action === 'getLopHoc') {
-    var sheet = ss.getSheetByName('LopHoc');
+    var sheet = ss.getSheetByName('LopHoc') || ss.getSheetByName('Lớp học') || ss.getSheetByName('Lớp Học') || ss.getSheetByName('LOPHOC') || ss.getSheetByName('lophoc');
     if (!sheet) return jsonResponse({ error: 'Chưa có sheet LopHoc' });
     var data = sheet.getDataRange().getDisplayValues();
     return jsonResponse(data);
@@ -469,7 +496,7 @@ function doGet(e) {
   
   // 5. Lấy bảng điểm bài thi
   if (action === 'getSubmissions') {
-    var sheet = ss.getSheetByName('BangDiem');
+    var sheet = ss.getSheetByName('BangDiem') || ss.getSheetByName('Bảng điểm') || ss.getSheetByName('BANGDIEM') || ss.getSheetByName('KetQua') || ss.getSheetByName('Submissions');
     if (!sheet) return jsonResponse({ error: 'Chưa có sheet BangDiem' });
     var data = sheet.getDataRange().getValues();
     return jsonResponse(data);
@@ -477,7 +504,7 @@ function doGet(e) {
 
   // 6. Lấy danh sách tên bài học
   if (action === 'getLessons' || action === 'getTenBaiHoc') {
-    var sheet = ss.getSheetByName('TenBaiHoc');
+    var sheet = ss.getSheetByName('TenBaiHoc') || ss.getSheetByName('Tên bài học') || ss.getSheetByName('BaiHoc') || ss.getSheetByName('Bài học');
     if (!sheet) return jsonResponse({ error: 'Chưa có sheet TenBaiHoc' });
     var data = sheet.getDataRange().getValues();
     return jsonResponse(data);
@@ -485,7 +512,7 @@ function doGet(e) {
 
   // 7. Lấy danh sách đề thi
   if (action === 'getTests' || action === 'getDeThi') {
-    var sheet = ss.getSheetByName('DeThi');
+    var sheet = ss.getSheetByName('DeThi') || ss.getSheetByName('Đề thi') || ss.getSheetByName('DETHI') || ss.getSheetByName('Tests');
     if (!sheet) return jsonResponse({ error: 'Chưa có sheet DeThi' });
     var data = sheet.getDataRange().getValues();
     return jsonResponse(data);
@@ -493,7 +520,7 @@ function doGet(e) {
 
   // 8. Lấy danh sách đợt giao đề
   if (action === 'getAssignments' || action === 'getGiaoDe') {
-    var sheet = ss.getSheetByName('GiaoDe');
+    var sheet = ss.getSheetByName('GiaoDe') || ss.getSheetByName('Giao đề') || ss.getSheetByName('GIAODE') || ss.getSheetByName('Assignments');
     if (!sheet) return jsonResponse({ error: 'Chưa có sheet GiaoDe' });
     var data = sheet.getDataRange().getValues();
     return jsonResponse(data);
@@ -501,7 +528,7 @@ function doGet(e) {
 
   // 9. Lấy danh sách giáo viên & phân công
   if (action === 'getTeachers' || action === 'getGiaoVien') {
-    var sheet = ss.getSheetByName('GiaoVien');
+    var sheet = ss.getSheetByName('GiaoVien') || ss.getSheetByName('Giáo viên') || ss.getSheetByName('GIAOVIEN') || ss.getSheetByName('Teachers');
     if (!sheet) return jsonResponse({ error: 'Chưa có sheet GiaoVien' });
     var data = sheet.getDataRange().getValues();
     return jsonResponse(data);
@@ -1172,7 +1199,7 @@ function jsonResponse(data) {
               activeSubTab === 'preview' ? 'bg-white text-emerald-800 shadow-xs' : 'text-slate-600 hover:text-slate-900'
             }`}
           >
-            Xem bảng tính (7 Sheet)
+            Xem bảng tính (Toàn bộ 9 Sheet)
           </button>
           <button
             type="button"
@@ -1633,18 +1660,20 @@ function jsonResponse(data) {
           <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-xs space-y-5">
             <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
               <FileSpreadsheet className="w-5 h-5 text-emerald-600" />
-              <span>2. Thiết lập Bảng tính Google Sheets Database (7 Sheets Quản Lý)</span>
+              <span>2. Thiết lập Bảng tính Google Sheets Database (Toàn bộ 9 Sheet CSDL)</span>
             </h2>
 
             {/* Sheets explanation cards */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-9 gap-2">
               {[
                 { name: 'TaiKhoan', desc: 'Tài khoản & MK', color: 'bg-rose-50 text-rose-700 border-rose-200', icon: Key },
                 { name: 'HocSinh', desc: 'Học sinh & MK', color: 'bg-sky-50 text-sky-700 border-sky-200', icon: Users },
                 { name: 'GiaoVien', desc: 'Giáo viên & BGH', color: 'bg-purple-50 text-purple-700 border-purple-200', icon: ShieldCheck },
-                { name: 'LopHoc', desc: 'Khối & Lớp học', color: 'bg-emerald-50 text-emerald-700 border-emerald-200', icon: Layers },
+                { name: 'LopHoc', desc: 'Khối, Lớp & Phân công', color: 'bg-emerald-50 text-emerald-700 border-emerald-200', icon: Layers },
+                { name: 'TenBaiHoc', desc: 'Tên bài học môn Tin', color: 'bg-blue-50 text-blue-700 border-blue-200', icon: BookOpen },
                 { name: 'CauHoi', desc: 'Ngân hàng câu hỏi', color: 'bg-amber-50 text-amber-700 border-amber-200', icon: Sparkles },
                 { name: 'DeThi', desc: 'Đề & Mã đề thi', color: 'bg-indigo-50 text-indigo-700 border-indigo-200', icon: Code2 },
+                { name: 'GiaoDe', desc: 'Đợt giao bài tập/thi', color: 'bg-cyan-50 text-cyan-700 border-cyan-200', icon: Send },
                 { name: 'BangDiem', desc: 'Kết quả làm bài', color: 'bg-teal-50 text-teal-700 border-teal-200', icon: CheckCircle2 }
               ].map((sheet) => {
                 const Icon = sheet.icon;
@@ -1677,7 +1706,7 @@ function jsonResponse(data) {
                   <br />
                   2. Sao chép ID bảng tính từ link trình duyệt và dán vào ô bên dưới.
                   <br />
-                  3. Bấm <strong>"Đẩy toàn bộ 7 sheet lên Google Sheet"</strong>. Hệ thống sẽ tự động khởi tạo đầy đủ 7 sheet (TaiKhoan, HocSinh, GiaoVien, LopHoc, CauHoi, DeThi, BangDiem) kèm tất cả tài khoản và mật khẩu!
+                  3. Bấm <strong>"Đẩy toàn bộ CSDL lên Google Sheet (9 Sheet)"</strong>. Hệ thống sẽ tự động khởi tạo đầy đủ toàn bộ 9 sheet (TaiKhoan, HocSinh, GiaoVien, LopHoc, TenBaiHoc, CauHoi, DeThi, GiaoDe, BangDiem) kèm tất cả tài khoản và mật khẩu!
                 </p>
               </div>
 
@@ -1732,7 +1761,7 @@ function jsonResponse(data) {
                   className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-semibold transition-colors shadow-xs disabled:opacity-50 cursor-pointer"
                 >
                   <Upload className="w-4 h-4" />
-                  <span>Đẩy toàn bộ 7 sheet lên Google Sheet</span>
+                  <span>Đẩy toàn bộ CSDL lên Google Sheet (9 Sheet)</span>
                 </button>
 
                 <button
@@ -1816,7 +1845,7 @@ function jsonResponse(data) {
                 <span>Xem trực tiếp dữ liệu Google Sheet Database</span>
               </h2>
               <p className="text-xs text-slate-500 mt-0.5">
-                Xem trước các bản ghi trong 7 sheet hiện có trên Google Spreadsheet
+                Xem trước các bản ghi trong toàn bộ 9 sheet CSDL hiện có trên Google Spreadsheet
               </p>
             </div>
 
@@ -1844,12 +1873,14 @@ function jsonResponse(data) {
                     : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                 }`}
               >
-                {tab === 'TaiKhoan' && '🔑 TaiKhoan (Tài khoản & MK)'}
+                {tab === 'TaiKhoan' && '🔑 TaiKhoan'}
                 {tab === 'HocSinh' && '🎓 HocSinh'}
                 {tab === 'GiaoVien' && '👨‍🏫 GiaoVien'}
                 {tab === 'LopHoc' && '🏫 LopHoc'}
+                {tab === 'TenBaiHoc' && '📖 TenBaiHoc'}
                 {tab === 'CauHoi' && '❓ CauHoi'}
                 {tab === 'DeThi' && '📝 DeThi'}
+                {tab === 'GiaoDe' && '📤 GiaoDe'}
                 {tab === 'BangDiem' && '📊 BangDiem'}
               </button>
             ))}
@@ -1864,7 +1895,7 @@ function jsonResponse(data) {
               </div>
             ) : sheetRows.length === 0 ? (
               <div className="py-12 text-center text-xs text-slate-400">
-                Chưa có dữ liệu trong sheet "{previewTab}". Bấm "Đẩy toàn bộ 7 sheet lên Google Sheet" để khởi tạo.
+                Chưa có dữ liệu trong sheet "{previewTab}". Bấm "Đẩy toàn bộ 9 sheet lên Google Sheet" để khởi tạo.
               </div>
             ) : (
               <table className="w-full text-xs text-left border-collapse">
@@ -2080,7 +2111,7 @@ git push -u origin main`}
             <div className="flex items-center justify-between pb-2 border-b border-slate-800">
               <div>
                 <span className="font-mono text-emerald-400 font-bold text-xs">Mã nguồn Google Apps Script (Code.gs)</span>
-                <span className="text-[11px] text-slate-400 ml-2">Đã tối ưu hóa đầy đủ cho 7 Sheet</span>
+                <span className="text-[11px] text-slate-400 ml-2">Đã tối ưu hóa đầy đủ cho toàn bộ 9 Sheet CSDL</span>
               </div>
               <button
                 type="button"

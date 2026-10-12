@@ -26,6 +26,12 @@ export const TeacherClasses: React.FC<TeacherClassesProps> = ({ currentUser }) =
   const [selectedClassId, setSelectedClassId] = useState<string>(() => classes[0]?.id || '');
   const [searchTerm, setSearchTerm] = useState('');
 
+  useEffect(() => {
+    if (classes.length > 0 && (!selectedClassId || !classes.some((c) => c.id === selectedClassId))) {
+      setSelectedClassId(classes[0].id);
+    }
+  }, [classes, selectedClassId]);
+
   const selectedClass = classes.find((c) => c.id === selectedClassId) || classes[0];
   const studentsInClass = users.filter((u) => u.role === 'STUDENT' && u.classId === selectedClass?.id && u.status !== 'DELETED');
 

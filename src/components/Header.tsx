@@ -131,12 +131,18 @@ export const Header: React.FC<HeaderProps> = ({
     ? classes.find((c) => c.id === currentUser.classId)?.name
     : null;
 
-  const assignedClassesText = currentUser.assignedClassIds?.length
-    ? classes
-        .filter((c) => currentUser.assignedClassIds?.includes(c.id))
-        .map((c) => c.name)
-        .join(', ')
-    : null;
+  const teacherClasses = (currentUser.role === 'TEACHER' || currentUser.role === 'DEPARTMENT_HEAD')
+    ? LMSStorageService.getClassesForTeacher(currentUser)
+    : [];
+
+  const assignedClassesText = teacherClasses.length
+    ? teacherClasses.map((c) => c.name).join(', ')
+    : (currentUser.assignedClassIds?.length
+        ? classes
+            .filter((c) => currentUser.assignedClassIds?.includes(c.id))
+            .map((c) => c.name)
+            .join(', ')
+        : null);
 
   return (
     <header className="sticky top-0 z-30 bg-white border-b border-slate-200 shadow-xs">

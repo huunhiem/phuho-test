@@ -82,7 +82,7 @@ export default function App() {
     currentUser ? getDefaultTabForRole(currentUser.role) : 'student_dashboard'
   );
 
-  // Tự động nạp sẵn toàn bộ dữ liệu 7 sheet từ Google Sheet của trường vào bộ nhớ khi mở ứng dụng
+  // Tự động nạp sẵn toàn bộ dữ liệu 9 sheet từ Google Sheet CSDL của trường khi mở ứng dụng
   useEffect(() => {
     GoogleSheetsService.syncAllFromAppsScript().catch(() => {});
 

@@ -245,20 +245,7 @@ export class LMSStorageService {
 
   // Classes
   static getClasses(): ClassRoom[] {
-    const stored = getStored<ClassRoom[]>(STORAGE_KEYS.CLASSES, INITIAL_CLASSES);
-    const existingIds = new Set(stored.map((c) => c.id));
-    let hasMissing = false;
-    const merged = [...stored];
-    INITIAL_CLASSES.forEach((initCls) => {
-      if (!existingIds.has(initCls.id)) {
-        merged.push(initCls);
-        hasMissing = true;
-      }
-    });
-    if (hasMissing) {
-      setStored(STORAGE_KEYS.CLASSES, merged);
-    }
-    return merged;
+    return getStored<ClassRoom[]>(STORAGE_KEYS.CLASSES, INITIAL_CLASSES);
   }
 
   static addClass(cls: ClassRoom): void {
@@ -309,20 +296,57 @@ export class LMSStorageService {
     notifyChange('classes');
   }
 
-  static importClasses(newClasses: ClassRoom[]): void {
-    const existing = this.getClasses();
-    const map = new Map<string, ClassRoom>();
-    // Map existing by ID and also keep a name lookup
-    const nameToId = new Map<string, string>();
+  /**
+   * Nạp danh sách Lớp học (từ Google Sheet LopHoc).
+   * Mặc định replaceAll = true để danh sách lớp khớp chính xác 100% với Google Sheet (không giữ lại các lớp mẫu ma)
+   */
+  static importClasses(newClasses: ClassRoom[], replaceAll = true): void {
+    if (!newClasses || newClasses.length === 0) return;
+
+    const existing = getStored<ClassRoom[]>(STORAGE_KEYS.CLASSES, INITIAL_CLASSES);
+    const existingMap = new Map<string, ClassRoom>();
+    const nameToExisting = new Map<string, ClassRoom>();
     existing.forEach((c) => {
-      map.set(c.id, c);
-      nameToId.set(c.name.trim().toLowerCase(), c.id);
+      existingMap.set(c.id, c);
+      const clean = c.name.trim().toLowerCase().replace(/^(lớp|lop)\s+/i, '');
+      nameToExisting.set(c.name.trim().toLowerCase(), c);
+      nameToExisting.set(clean, c);
     });
 
+    if (replaceAll) {
+      // Khi nạp từ Google Sheet, danh sách lớp mới là nguồn chân lý duy nhất (Source of Truth)
+      const finalClasses: ClassRoom[] = newClasses.map((c) => {
+        const cleanName = c.name.trim().toLowerCase();
+        const stripped = cleanName.replace(/^(lớp|lop)\s+/i, '');
+        const prev = existingMap.get(c.id) || nameToExisting.get(cleanName) || nameToExisting.get(stripped);
+        const targetId = prev?.id || c.id;
+
+        return {
+          ...prev,
+          ...c,
+          id: targetId,
+          homeroomTeacherId: c.homeroomTeacherId || prev?.homeroomTeacherId,
+          homeroomTeacherName: c.homeroomTeacherName || prev?.homeroomTeacherName || '',
+          subjectTeacherId: c.subjectTeacherId || prev?.subjectTeacherId,
+          subjectTeacherName: c.subjectTeacherName || prev?.subjectTeacherName || '',
+          assignedTeacherIds: Array.from(
+            new Set([...(c.assignedTeacherIds || []), ...(prev?.assignedTeacherIds || [])])
+          )
+        };
+      });
+
+      setStored(STORAGE_KEYS.CLASSES, finalClasses);
+      this.refreshTeacherAssignmentsFromClasses();
+      notifyChange('classes');
+      return;
+    }
+
+    // Chế độ gộp nếu replaceAll = false
+    const map = new Map<string, ClassRoom>(existingMap);
     newClasses.forEach((c) => {
       const cleanName = c.name.trim().toLowerCase();
-      // If a class with the same name already exists, keep the existing ID
-      const existingId = nameToId.get(cleanName);
+      const stripped = cleanName.replace(/^(lớp|lop)\s+/i, '');
+      const existingId = nameToExisting.get(cleanName)?.id || nameToExisting.get(stripped)?.id;
       const targetId = existingId || c.id;
       const prev = map.get(targetId);
 
@@ -331,19 +355,182 @@ export class LMSStorageService {
         ...c,
         id: targetId,
         homeroomTeacherId: c.homeroomTeacherId || prev?.homeroomTeacherId,
-        homeroomTeacherName: c.homeroomTeacherName || prev?.homeroomTeacherName,
+        homeroomTeacherName: c.homeroomTeacherName || prev?.homeroomTeacherName || '',
         subjectTeacherId: c.subjectTeacherId || prev?.subjectTeacherId,
-        subjectTeacherName: c.subjectTeacherName || prev?.subjectTeacherName,
-        assignedTeacherIds: Array.from(new Set([...(prev?.assignedTeacherIds || []), ...(c.assignedTeacherIds || [])]))
+        subjectTeacherName: c.subjectTeacherName || prev?.subjectTeacherName || '',
+        assignedTeacherIds: Array.from(new Set([...(c.assignedTeacherIds || []), ...(prev?.assignedTeacherIds || [])]))
       };
 
       map.set(targetId, mergedClass);
-      nameToId.set(cleanName, targetId);
     });
 
     const merged = Array.from(map.values());
     setStored(STORAGE_KEYS.CLASSES, merged);
+    this.refreshTeacherAssignmentsFromClasses();
     notifyChange('classes');
+  }
+
+  /**
+   * Kiểm tra xem tên giáo viên trong chuỗi (từ Sheet LopHoc) có khớp với đối tượng User giáo viên hay không
+   * Hỗ trợ mọi biến thể: đầy đủ, viết tắt, chức danh (Thầy/Cô/GV), tên gọi (từ cuối), tên đăng nhập, mã GV, phân công nhiều GV
+   */
+  static isTeacherNameMatch(teacherString: string, teacherUser: User): boolean {
+    if (!teacherString || !teacherUser) return false;
+    const cleanTitle = (val: string) =>
+      (val || '')
+        .toLowerCase()
+        .replace(/^(thầy|cô|gv|giáo viên|thầy\/cô|thay|co)\s+/i, '')
+        .replace(/\s*\([^)]*\)/g, '')
+        .trim();
+
+    const tFull = (teacherUser.fullName || '').toLowerCase().trim();
+    const tClean = cleanTitle(teacherUser.fullName || '');
+    const tUser = (teacherUser.username || '').toLowerCase().trim();
+    const tCode = (teacherUser.teacherCode || '').toLowerCase().trim();
+    const tEmail = (teacherUser.email || '').toLowerCase().trim().split('@')[0];
+    const tLastName = tClean.split(/\s+/).pop() || '';
+
+    const splitNames = teacherString.split(/[,;/+\n]/).map((s) => cleanTitle(s)).filter(Boolean);
+
+    for (const rawItem of splitNames) {
+      const item = cleanTitle(rawItem);
+      if (!item) continue;
+
+      // 1. Khớp chính xác tên đầy đủ, tên chuẩn hóa, username, mã giáo viên, email
+      if (
+        item === tClean ||
+        item === tFull ||
+        item === tUser ||
+        (tCode && item === tCode) ||
+        (tEmail && item === tEmail)
+      ) {
+        return true;
+      }
+
+      // 2. Chứa chuỗi nhau
+      if (tClean && (item.includes(tClean) || tClean.includes(item))) {
+        return true;
+      }
+      if (tFull && (item.includes(tFull) || tFull.includes(item))) {
+        return true;
+      }
+      if (tUser && (item === tUser || item.includes(tUser))) {
+        return true;
+      }
+
+      // 3. Khớp tên gọi (từ cuối cùng - tên riêng của giáo viên như "Long", "Mai", "Cường")
+      const itemLastName = item.split(/\s+/).pop() || '';
+      if (tLastName && itemLastName && tLastName === itemLastName && tLastName.length >= 2) {
+        if (item === itemLastName || item.includes(tLastName)) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Tự động quét và liên kết hai chiều giữa Lớp học và Giáo viên theo phân công từ Sheet LopHoc
+   */
+  static refreshTeacherAssignmentsFromClasses(): void {
+    const classes = this.getClasses();
+    const users = this.getUsers();
+    const staff = users.filter((u) => u.role !== 'STUDENT');
+    if (classes.length === 0 || staff.length === 0) return;
+
+    let hasUsersChanged = false;
+    let hasClassesChanged = false;
+
+    // 1. Cập nhật assignedClassIds cho từng giáo viên dựa trên lớp học
+    const updatedUsers = users.map((u) => {
+      if (u.role === 'STUDENT') return u;
+      const myClassIds = new Set(u.assignedClassIds || []);
+
+      classes.forEach((c) => {
+        const isSubjectMatch = c.subjectTeacherName && this.isTeacherNameMatch(c.subjectTeacherName, u);
+        const isHomeroomMatch = c.homeroomTeacherName && this.isTeacherNameMatch(c.homeroomTeacherName, u);
+        const isIdMatch =
+          c.assignedTeacherIds?.includes(u.id) ||
+          c.subjectTeacherId === u.id ||
+          c.homeroomTeacherId === u.id;
+
+        if (isSubjectMatch || isHomeroomMatch || isIdMatch) {
+          if (!myClassIds.has(c.id)) {
+            myClassIds.add(c.id);
+            hasUsersChanged = true;
+          }
+        }
+      });
+
+      const nextAssigned = Array.from(myClassIds);
+      if (nextAssigned.length !== (u.assignedClassIds || []).length) {
+        hasUsersChanged = true;
+        return { ...u, assignedClassIds: nextAssigned };
+      }
+      return u;
+    });
+
+    // 2. Cập nhật ngược lại assignedTeacherIds & subjectTeacherId cho từng Lớp học
+    const updatedClasses = classes.map((c) => {
+      const teacherIds = new Set(c.assignedTeacherIds || []);
+      let subjectTeacherId = c.subjectTeacherId;
+      let homeroomTeacherId = c.homeroomTeacherId;
+
+      staff.forEach((t) => {
+        const isAssigned = t.assignedClassIds?.includes(c.id);
+        const isSubjectMatch = c.subjectTeacherName && this.isTeacherNameMatch(c.subjectTeacherName, t);
+        const isHomeroomMatch = c.homeroomTeacherName && this.isTeacherNameMatch(c.homeroomTeacherName, t);
+
+        if (isAssigned || isSubjectMatch || isHomeroomMatch) {
+          if (!teacherIds.has(t.id)) {
+            teacherIds.add(t.id);
+            hasClassesChanged = true;
+          }
+          if (isSubjectMatch && !subjectTeacherId) {
+            subjectTeacherId = t.id;
+            hasClassesChanged = true;
+          }
+          if (isHomeroomMatch && !homeroomTeacherId) {
+            homeroomTeacherId = t.id;
+            hasClassesChanged = true;
+          }
+        }
+      });
+
+      const nextTeacherIds = Array.from(teacherIds);
+      if (
+        nextTeacherIds.length !== (c.assignedTeacherIds || []).length ||
+        subjectTeacherId !== c.subjectTeacherId ||
+        homeroomTeacherId !== c.homeroomTeacherId
+      ) {
+        hasClassesChanged = true;
+        return {
+          ...c,
+          assignedTeacherIds: nextTeacherIds,
+          subjectTeacherId: subjectTeacherId || c.subjectTeacherId,
+          homeroomTeacherId: homeroomTeacherId || c.homeroomTeacherId
+        };
+      }
+      return c;
+    });
+
+    if (hasUsersChanged) {
+      setStored(STORAGE_KEYS.USERS, updatedUsers);
+      const curr = this.getCurrentUser();
+      if (curr) {
+        const updatedCurr = updatedUsers.find((u) => u.id === curr.id);
+        if (updatedCurr) {
+          this.setCurrentUser({ ...curr, assignedClassIds: updatedCurr.assignedClassIds });
+        }
+      }
+      notifyChange('users');
+    }
+
+    if (hasClassesChanged) {
+      setStored(STORAGE_KEYS.CLASSES, updatedClasses);
+      notifyChange('classes');
+    }
   }
 
   /**
@@ -357,14 +544,21 @@ export class LMSStorageService {
       return allClasses;
     }
 
-    const tFull = (user.fullName || '').toLowerCase().trim();
-    const tUser = (user.username || '').toLowerCase().trim();
-    const tCode = (user.teacherCode || '').toLowerCase().trim();
     const assignedIds = new Set(user.assignedClassIds || []);
 
     return allClasses.filter((c) => {
-      // 1. Giáo viên có class.id hoặc class.name trong assignedClassIds
-      if (assignedIds.has(c.id) || assignedIds.has(c.name)) return true;
+      const cCleanName = c.name.toLowerCase().replace(/^(lớp|lop)\s+/i, '').trim();
+
+      // 1. Giáo viên có class.id hoặc class.name trong assignedClassIds (hỗ trợ nhiều biến thể định dạng)
+      if (
+        assignedIds.has(c.id) ||
+        assignedIds.has(c.name) ||
+        assignedIds.has(cCleanName) ||
+        assignedIds.has(c.name.replace('/', '-')) ||
+        assignedIds.has(`cls-${c.name.replace('/', '-')}`)
+      ) {
+        return true;
+      }
 
       // 2. Class có ID giáo viên trong assignedTeacherIds hoặc subjectTeacherId hoặc homeroomTeacherId
       if (
@@ -376,41 +570,13 @@ export class LMSStorageService {
       }
 
       // 3. Đối chiếu tên giáo viên phân công từ cột 5 của Sheet LopHoc (subjectTeacherName)
-      const subjName = (c.subjectTeacherName || '').toLowerCase().trim();
-      if (subjName) {
-        if (
-          subjName === tFull ||
-          subjName === tUser ||
-          (tCode && subjName === tCode) ||
-          subjName.includes(tFull) ||
-          (tFull && tFull.includes(subjName)) ||
-          subjName.includes(tUser)
-        ) {
-          return true;
-        }
-        // Trường hợp phân công nhiều giáo viên: "Võ Hoàng Long, Lê Thị Mai"
-        const teacherNames = subjName.split(/[,;/+]/).map((s) => s.trim()).filter(Boolean);
-        if (
-          teacherNames.some(
-            (n) => n === tFull || n === tUser || (tFull && (tFull.includes(n) || n.includes(tFull)))
-          )
-        ) {
-          return true;
-        }
+      if (c.subjectTeacherName && this.isTeacherNameMatch(c.subjectTeacherName, user)) {
+        return true;
       }
 
       // 4. Đối chiếu tên giáo viên chủ nhiệm
-      const homeName = (c.homeroomTeacherName || '').toLowerCase().trim();
-      if (homeName) {
-        if (
-          homeName === tFull ||
-          homeName === tUser ||
-          (tCode && homeName === tCode) ||
-          homeName.includes(tFull) ||
-          (tFull && tFull.includes(homeName))
-        ) {
-          return true;
-        }
+      if (c.homeroomTeacherName && this.isTeacherNameMatch(c.homeroomTeacherName, user)) {
+        return true;
       }
 
       return false;
