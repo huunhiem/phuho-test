@@ -8,7 +8,7 @@ import {
   signOut
 } from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
-import { LMSStorageService, normalizeKNTTTopic } from './storage';
+import { LMSStorageService, normalizeKNTTTopic, parseDateTimeFlexible } from './storage';
 import { onStorageChange, notifyChange } from './storageEvents';
 import {
   APPS_SCRIPT_URL_KEY,
@@ -52,7 +52,9 @@ import {
   QuestionType,
   OptionItem,
   TrueFalseStatement,
-  Submission
+  Submission,
+  Test,
+  Assignment
 } from '../types';
 import { GoogleDriveService } from './googleDriveService';
 
@@ -1309,6 +1311,97 @@ export class GoogleSheetsService {
   }
 
   /**
+   * Chuẩn hóa tên Sheet loại bỏ dấu tiếng Việt và ký tự đặc biệt để so sánh linh hoạt
+   */
+  static normalizeSheetName(name: string): string {
+    return (name || '')
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/đ/g, 'd')
+      .replace(/[^a-z0-9]/g, '');
+  }
+
+  /**
+   * Tìm tên sheet thực tế trên Google Spreadsheet tương ứng với danh sách ứng viên (hỗ trợ cả tiếng Việt có dấu, không dấu)
+   */
+  static async findMatchingSheetTitle(
+    spreadsheetId: string,
+    candidates: string[],
+    accessToken: string
+  ): Promise<string | null> {
+    try {
+      const res = await fetch(
+        `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=sheets.properties.title`,
+        { headers: { Authorization: `Bearer ${accessToken}` } }
+      );
+      if (!res.ok) return null;
+      const data = await res.json();
+      const sheetTitles: string[] = (data.sheets || [])
+        .map((s: any) => s.properties?.title)
+        .filter(Boolean);
+
+      // 1. Thử khớp chính xác
+      for (const title of sheetTitles) {
+        if (candidates.includes(title)) return title;
+      }
+
+      // 2. Thử khớp không dấu
+      const normCandidates = candidates.map((c) => this.normalizeSheetName(c));
+      for (const title of sheetTitles) {
+        const normTitle = this.normalizeSheetName(title);
+        for (const nc of normCandidates) {
+          if (normTitle === nc || normTitle.includes(nc) || nc.includes(normTitle)) {
+            return title;
+          }
+        }
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Đọc dữ liệu từ Sheet với cơ chế tự động dò tìm tên Sheet (hỗ trợ cả LopHoc, Lớp học, Lớp Học, v.v.)
+   */
+  static async readSheetWithFallback(
+    spreadsheetId: string,
+    candidateTitles: string[],
+    rangePostfix: string,
+    accessToken: string
+  ): Promise<{ sheetTitle: string; rows: any[][] }> {
+    const preferred = candidateTitles[0];
+    try {
+      const rows = await this.readSheetValues(spreadsheetId, `${preferred}!${rangePostfix}`, accessToken);
+      if (rows && rows.length > 0) {
+        return { sheetTitle: preferred, rows };
+      }
+    } catch {
+      // Bỏ qua lỗi và tìm sheet thực tế
+    }
+
+    const matchedTitle = await this.findMatchingSheetTitle(spreadsheetId, candidateTitles, accessToken);
+    if (matchedTitle && matchedTitle !== preferred) {
+      try {
+        const rows = await this.readSheetValues(spreadsheetId, `${matchedTitle}!${rangePostfix}`, accessToken);
+        return { sheetTitle: matchedTitle, rows };
+      } catch {}
+    }
+
+    for (const alt of candidateTitles.slice(1)) {
+      try {
+        const rows = await this.readSheetValues(spreadsheetId, `${alt}!${rangePostfix}`, accessToken);
+        if (rows && rows.length > 0) {
+          return { sheetTitle: alt, rows };
+        }
+      } catch {}
+    }
+
+    return { sheetTitle: preferred, rows: [] };
+  }
+
+  /**
    * Tải toàn bộ tài khoản, tên đăng nhập & mật khẩu từ sheet TaiKhoan về cập nhật vào LMS
    */
   static async pullAccountsFromSheet(
@@ -1594,7 +1687,7 @@ export class GoogleSheetsService {
     let colHomeroom = -1;
     let colSubject = -1;
 
-    for (let rIdx = 0; rIdx < Math.min(3, rows.length); rIdx++) {
+    for (let rIdx = 0; rIdx < Math.min(10, rows.length); rIdx++) {
       const r = rows[rIdx];
       if (!Array.isArray(r)) continue;
       const joined = r.map((c) => String(c || '').toLowerCase()).join(' ');
@@ -1650,6 +1743,7 @@ export class GoogleSheetsService {
     }
 
     const dataRows = headerRowIdx >= 0 ? rows.slice(headerRowIdx + 1) : rows;
+    const seenClassNames = new Set<string>();
 
     for (let i = 0; i < dataRows.length; i++) {
       const row = dataRows[i];
@@ -1699,6 +1793,17 @@ export class GoogleSheetsService {
       if (!cleanName || cleanName.toLowerCase() === 'tên lớp' || cleanName.toLowerCase() === 'lớp') {
         continue;
       }
+
+      // Chỉ chấp nhận định dạng lớp cấp THCS hợp lệ (Khối 6-9, ví dụ 6/1, 6A, 7/2, 8/7, 9/1)
+      if (!/^[6-9][\/\.\-_A-Za-z0-9]+$/i.test(cleanName)) {
+        continue;
+      }
+
+      // Ngăn chặn trùng lặp cùng một lớp học
+      if (seenClassNames.has(cleanName.toLowerCase())) {
+        continue;
+      }
+      seenClassNames.add(cleanName.toLowerCase());
 
       let gradeNum = 6;
       if (rawGrade) {
@@ -1828,13 +1933,18 @@ export class GoogleSheetsService {
     spreadsheetId: string,
     accessToken: string
   ): Promise<number> {
-    const rows = await this.readSheetValues(spreadsheetId, 'LopHoc!A1:Z', accessToken);
+    const { rows } = await this.readSheetWithFallback(
+      spreadsheetId,
+      ['LopHoc', 'Lớp học', 'Lớp Học', 'LOPHOC', 'lophoc', 'Danh sách lớp'],
+      'A1:Z',
+      accessToken
+    );
     if (!rows || rows.length === 0) return 0;
 
     const { importedClasses, teacherAssignments } = this.parseLopHocRows(rows);
 
     if (importedClasses.length > 0) {
-      LMSStorageService.importClasses(importedClasses);
+      LMSStorageService.importClasses(importedClasses, true);
       const users = LMSStorageService.getUsers();
       const currentLoggedIn = LMSStorageService.getCurrentUser();
       Object.entries(teacherAssignments).forEach(([tId, cIds]) => {
@@ -1876,7 +1986,7 @@ export class GoogleSheetsService {
       const { importedClasses, teacherAssignments } = this.parseLopHocRows(data);
 
       if (importedClasses.length > 0) {
-        LMSStorageService.importClasses(importedClasses);
+        LMSStorageService.importClasses(importedClasses, true);
         const users = LMSStorageService.getUsers();
         const currentLoggedIn = LMSStorageService.getCurrentUser();
         Object.entries(teacherAssignments).forEach(([tId, cIds]) => {
@@ -1901,6 +2011,85 @@ export class GoogleSheetsService {
   }
 
   /**
+   * Tải danh sách Đề thi (sheet DeThi / Đề thi) từ Google Sheet về LMS (OAuth Direct)
+   */
+  static async pullTestsFromSheet(
+    spreadsheetId: string,
+    accessToken: string
+  ): Promise<number> {
+    const { rows } = await this.readSheetWithFallback(
+      spreadsheetId,
+      ['DeThi', 'Đề thi', 'Đề Thi', 'DETHI', 'dethi', 'Tests', 'Danh sách đề thi'],
+      'A1:Z',
+      accessToken
+    );
+    if (!rows || rows.length <= 1) return 0;
+
+    let headerRowIdx = 0;
+    for (let rIdx = 0; rIdx < Math.min(5, rows.length); rIdx++) {
+      const r = rows[rIdx];
+      const joined = (r || []).map((c) => String(c || '').toLowerCase()).join(' ');
+      if (joined.includes('đề') || joined.includes('tên đề') || joined.includes('thời gian') || joined.includes('mã đề')) {
+        headerRowIdx = rIdx;
+        break;
+      }
+    }
+
+    const dataRows = rows.slice(headerRowIdx + 1);
+    const allQuestions = LMSStorageService.getQuestions();
+    const imported: Test[] = [];
+
+    for (let i = 0; i < dataRows.length; i++) {
+      const row = dataRows[i];
+      if (!row || (!row[0] && !row[1])) continue;
+
+      const id = String(row[0] || `test-${Date.now()}-${i}`).trim();
+      const title = String(row[1] || row[0] || 'Đề kiểm tra Tin học').trim();
+      if (!title || title.toLowerCase() === 'tên đề thi' || title.toLowerCase() === 'tên đề') continue;
+
+      const gradeStr = String(row[2] || '6');
+      const gradeLevel = parseInt(gradeStr.replace(/[^0-9]/g, ''), 10) || 6;
+      const durationMinutes = parseInt(String(row[3] || '45').replace(/[^0-9]/g, ''), 10) || 45;
+      const totalQuestions = parseInt(String(row[4] || '20').replace(/[^0-9]/g, ''), 10) || 20;
+      const variantCode = String(row[5] || '101').trim() || '101';
+      const authorName = String(row[6] || 'Giáo viên Tin học').trim();
+      const createdAt = String(row[7] || new Date().toISOString().split('T')[0]).trim();
+      const status = String(row[8] || 'READY').trim().toUpperCase() === 'ARCHIVED' ? 'READY' : 'READY';
+
+      const gradeQuestions = allQuestions.filter((q) => q.gradeLevel === gradeLevel);
+      const questionIds = gradeQuestions.slice(0, totalQuestions).map((q) => q.id);
+
+      imported.push({
+        id,
+        title,
+        gradeLevel,
+        durationMinutes,
+        totalQuestions: questionIds.length > 0 ? questionIds.length : totalQuestions,
+        totalPoints: 10,
+        questionIds,
+        variants: [{ code: variantCode, questionIds }],
+        createdBy: 'user-admin-01',
+        authorName,
+        createdAt: createdAt || new Date().toISOString().split('T')[0],
+        status,
+        matrix: {
+          knowCount: Math.round(totalQuestions * 0.4),
+          understandCount: Math.round(totalQuestions * 0.3),
+          applyCount: Math.max(0, totalQuestions - Math.round(totalQuestions * 0.7)),
+          selectedTopics: []
+        }
+      });
+    }
+
+    if (imported.length > 0) {
+      LMSStorageService.importTests(imported);
+      notifyChange('tests');
+    }
+
+    return imported.length;
+  }
+
+  /**
    * Tải danh sách Đề thi (DeThi) từ Google Sheet qua Apps Script
    */
   static async pullTestsFromAppsScript(): Promise<{ success: boolean; count: number; error?: string }> {
@@ -1915,33 +2104,41 @@ export class GoogleSheetsService {
       if (!Array.isArray(data) || data.length <= 1) return { success: true, count: 0 };
 
       const rows = data.slice(1);
-      const imported: any[] = [];
-      for (const row of rows) {
-        if (!row || !row[0]) continue;
-        const id = String(row[0]).trim();
-        const title = String(row[1] || 'Đề kiểm tra Tin học').trim();
-        // Bỏ qua dòng tiêu đề
-        if (title.toLowerCase() === 'tên đề thi') continue;
+      const allQuestions = LMSStorageService.getQuestions();
+      const imported: Test[] = [];
+
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        if (!row || (!row[0] && !row[1])) continue;
+        const id = String(row[0] || `test-${Date.now()}-${i}`).trim();
+        const title = String(row[1] || row[0] || 'Đề kiểm tra Tin học').trim();
+        if (!title || title.toLowerCase() === 'tên đề thi' || title.toLowerCase() === 'tên đề') continue;
 
         const gradeStr = String(row[2] || '6');
         const gradeLevel = parseInt(gradeStr.replace(/[^0-9]/g, ''), 10) || 6;
-        const durationMinutes = parseInt(String(row[3] || '45'), 10) || 45;
-        const totalQuestions = parseInt(String(row[4] || '20'), 10) || 20;
-        const variantCode = String(row[5] || '101').trim();
-        const authorName = String(row[6] || 'Giáo viên').trim();
+        const durationMinutes = parseInt(String(row[3] || '45').replace(/[^0-9]/g, ''), 10) || 45;
+        const totalQuestions = parseInt(String(row[4] || '20').replace(/[^0-9]/g, ''), 10) || 20;
+        const variantCode = String(row[5] || '101').trim() || '101';
+        const authorName = String(row[6] || 'Giáo viên Tin học').trim();
         const createdAt = String(row[7] || new Date().toISOString().split('T')[0]).trim();
-        const status = String(row[8] || 'READY').trim().toUpperCase();
+        const status = String(row[8] || 'READY').trim().toUpperCase() === 'ARCHIVED' ? 'READY' : 'READY';
+
+        const gradeQuestions = allQuestions.filter((q) => q.gradeLevel === gradeLevel);
+        const questionIds = gradeQuestions.slice(0, totalQuestions).map((q) => q.id);
 
         imported.push({
           id,
           title,
           gradeLevel,
           durationMinutes,
-          totalQuestions,
-          variants: [{ id: `var-${id}-1`, code: variantCode, questions: [] }],
+          totalQuestions: questionIds.length > 0 ? questionIds.length : totalQuestions,
+          totalPoints: 10,
+          questionIds,
+          variants: [{ code: variantCode, questionIds }],
           authorName,
-          createdAt,
-          status: status === 'ARCHIVED' ? 'ARCHIVED' : 'READY',
+          createdBy: 'user-admin-01',
+          createdAt: createdAt || new Date().toISOString().split('T')[0],
+          status,
           matrix: {
             knowCount: Math.round(totalQuestions * 0.4),
             understandCount: Math.round(totalQuestions * 0.3),
@@ -1952,11 +2149,97 @@ export class GoogleSheetsService {
       }
       if (imported.length > 0) {
         LMSStorageService.importTests(imported);
+        notifyChange('tests');
       }
       return { success: true, count: imported.length };
     } catch (e: any) {
       return { success: false, count: 0, error: e.message };
     }
+  }
+
+  /**
+   * Tải danh sách Đợt giao đề (sheet GiaoDe / Giao đề) từ Google Sheet về LMS (OAuth Direct)
+   */
+  static async pullAssignmentsFromSheet(
+    spreadsheetId: string,
+    accessToken: string
+  ): Promise<number> {
+    const { rows } = await this.readSheetWithFallback(
+      spreadsheetId,
+      ['GiaoDe', 'Giao đề', 'Giao Đề', 'GIAODE', 'giaode', 'Assignments', 'Danh sách giao đề'],
+      'A1:Z',
+      accessToken
+    );
+    if (!rows || rows.length <= 1) return 0;
+
+    let headerRowIdx = 0;
+    for (let rIdx = 0; rIdx < Math.min(5, rows.length); rIdx++) {
+      const r = rows[rIdx];
+      const joined = (r || []).map((c) => String(c || '').toLowerCase()).join(' ');
+      if (joined.includes('giao') || joined.includes('bài kiểm tra') || joined.includes('lớp') || joined.includes('thời gian')) {
+        headerRowIdx = rIdx;
+        break;
+      }
+    }
+
+    const dataRows = rows.slice(headerRowIdx + 1);
+    const classes = LMSStorageService.getClasses();
+    const tests = LMSStorageService.getTests();
+    const imported: Assignment[] = [];
+
+    for (let i = 0; i < dataRows.length; i++) {
+      const row = dataRows[i];
+      if (!row || (!row[0] && !row[1])) continue;
+
+      const id = String(row[0] || `assign-${Date.now()}-${i}`).trim();
+      const testTitle = String(row[1] || row[0] || 'Bài kiểm tra Tin học').trim();
+      if (!testTitle || testTitle.toLowerCase() === 'tên bài kiểm tra' || testTitle.toLowerCase() === 'tên bài') continue;
+
+      const gradeStr = String(row[2] || '6');
+      const gradeLevel = parseInt(gradeStr.replace(/[^0-9]/g, ''), 10) || 6;
+      const classNamesStr = String(row[3] || '').trim();
+      const classNames = classNamesStr ? classNamesStr.split(/[,;]/).map((s) => s.trim()).filter(Boolean) : [classes[0]?.name || '6/1'];
+      const classIds = classNames.map((cn) => classes.find((c) => c.name === cn)?.id || `cls-${cn.replace('/', '-')}`).filter(Boolean);
+
+      const startTime = String(row[4] || '').trim();
+      const endTime = String(row[5] || '').trim();
+      const password = String(row[6] || '').trim();
+      const allowReview = String(row[7] || '').trim().toLowerCase() !== 'không';
+      const shuffle = String(row[8] || '').trim().toLowerCase() !== 'không';
+      const assignedByName = String(row[9] || 'Giáo viên').trim();
+      const createdAt = String(row[10] || '').trim();
+      const status = String(row[11] || 'ACTIVE').trim().toUpperCase() === 'CLOSED' ? 'CLOSED' : 'ACTIVE';
+
+      const matchedTest = tests.find(
+        (t) => t.title.trim().toLowerCase() === testTitle.toLowerCase() || t.id === id
+      );
+      const testId = matchedTest?.id || (tests[0]?.id || `test-${id}`);
+
+      imported.push({
+        id,
+        testId,
+        testTitle: matchedTest?.title || testTitle,
+        gradeLevel: matchedTest?.gradeLevel || gradeLevel,
+        classIds: classIds.length > 0 ? classIds : [classes[0]?.id || 'cls-6-1'],
+        classNames,
+        startTime: parseDateTimeFlexible(startTime),
+        endTime: parseDateTimeFlexible(endTime || new Date(Date.now() + 7 * 86400000).toISOString()),
+        password: password === 'Không có' ? undefined : (password || undefined),
+        allowReviewAfterSubmit: allowReview,
+        shuffleQuestions: shuffle,
+        assignedBy: 'user-admin-01',
+        assignedByName,
+        createdAt: createdAt || new Date().toISOString().split('T')[0],
+        status
+      });
+    }
+
+    if (imported.length > 0) {
+      LMSStorageService.importAssignments(imported);
+      notifyChange('assignments');
+    }
+
+    return imported.length;
   }
 
   /**
@@ -1975,39 +2258,48 @@ export class GoogleSheetsService {
 
       const rows = data.slice(1);
       const classes = LMSStorageService.getClasses();
-      const imported: any[] = [];
-      for (const row of rows) {
-        if (!row || !row[0]) continue;
-        const id = String(row[0]).trim();
-        const testTitle = String(row[1] || 'Bài kiểm tra Tin học').trim();
-        if (testTitle.toLowerCase() === 'tên bài kiểm tra') continue;
+      const tests = LMSStorageService.getTests();
+      const imported: Assignment[] = [];
+
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        if (!row || (!row[0] && !row[1])) continue;
+        const id = String(row[0] || `assign-${Date.now()}-${i}`).trim();
+        const testTitle = String(row[1] || row[0] || 'Bài kiểm tra Tin học').trim();
+        if (!testTitle || testTitle.toLowerCase() === 'tên bài kiểm tra' || testTitle.toLowerCase() === 'tên bài') continue;
 
         const gradeStr = String(row[2] || '6');
         const gradeLevel = parseInt(gradeStr.replace(/[^0-9]/g, ''), 10) || 6;
         const classNamesStr = String(row[3] || '').trim();
-        const classNames = classNamesStr ? classNamesStr.split(/[,;]/).map((s) => s.trim()).filter(Boolean) : [];
+        const classNames = classNamesStr ? classNamesStr.split(/[,;]/).map((s) => s.trim()).filter(Boolean) : [classes[0]?.name || '6/1'];
         const classIds = classNames.map((cn) => classes.find((c) => c.name === cn)?.id || `cls-${cn.replace('/', '-')}`).filter(Boolean);
         const startTime = String(row[4] || '').trim();
         const endTime = String(row[5] || '').trim();
         const password = String(row[6] || '').trim();
-        const allowReview = String(row[7] || '').trim().toLowerCase() === 'có';
-        const shuffle = String(row[8] || '').trim().toLowerCase() === 'có';
+        const allowReview = String(row[7] || '').trim().toLowerCase() !== 'không';
+        const shuffle = String(row[8] || '').trim().toLowerCase() !== 'không';
         const assignedByName = String(row[9] || 'Giáo viên').trim();
         const createdAt = String(row[10] || '').trim();
         const status = String(row[11] || 'ACTIVE').trim().toUpperCase() === 'CLOSED' ? 'CLOSED' : 'ACTIVE';
 
+        const matchedTest = tests.find(
+          (t) => t.title.trim().toLowerCase() === testTitle.toLowerCase() || t.id === id
+        );
+        const testId = matchedTest?.id || (tests[0]?.id || `test-${id}`);
+
         imported.push({
           id,
-          testId: `test-${id}`,
-          testTitle,
-          gradeLevel,
-          classIds,
+          testId,
+          testTitle: matchedTest?.title || testTitle,
+          gradeLevel: matchedTest?.gradeLevel || gradeLevel,
+          classIds: classIds.length > 0 ? classIds : [classes[0]?.id || 'cls-6-1'],
           classNames,
-          startTime: startTime || new Date().toISOString(),
-          endTime: endTime || new Date(Date.now() + 86400000 * 7).toISOString(),
-          password: password === 'Không có' ? '' : password,
+          startTime: parseDateTimeFlexible(startTime),
+          endTime: parseDateTimeFlexible(endTime || new Date(Date.now() + 7 * 86400000).toISOString()),
+          password: password === 'Không có' ? undefined : (password || undefined),
           allowReviewAfterSubmit: allowReview,
           shuffleQuestions: shuffle,
+          assignedBy: 'user-admin-01',
           assignedByName,
           createdAt: createdAt || new Date().toISOString().split('T')[0],
           status
@@ -2015,6 +2307,7 @@ export class GoogleSheetsService {
       }
       if (imported.length > 0) {
         LMSStorageService.importAssignments(imported);
+        notifyChange('assignments');
       }
       return { success: true, count: imported.length };
     } catch (e: any) {

@@ -74,6 +74,44 @@ function setStored<T>(key: string, value: T): void {
   }
 }
 
+/**
+ * Hàm phân tích ngày giờ linh hoạt: Hỗ trợ ISO string, định dạng Việt Nam, Date object
+ * Ngăn chặn hoàn toàn lỗi RangeError: Invalid time value khi đọc từ Google Sheet
+ */
+export function parseDateTimeFlexible(val: any): string {
+  if (!val) return new Date().toISOString();
+  if (val instanceof Date) {
+    return isNaN(val.getTime()) ? new Date().toISOString() : val.toISOString();
+  }
+  const s = String(val).trim();
+  if (!s || s.toLowerCase() === 'không có' || s.toLowerCase() === 'n/a') {
+    return new Date().toISOString();
+  }
+  // Thử parse trực tiếp nếu là định dạng chuẩn ISO hoặc RFC
+  const parsedDirect = Date.parse(s);
+  if (!isNaN(parsedDirect)) {
+    return new Date(parsedDirect).toISOString();
+  }
+
+  // Định dạng Việt Nam: "14:30:00 12/10/2026" hoặc "14:30 12/10/2026"
+  const viTimeFirst = s.match(/^(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?\s+(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})$/);
+  if (viTimeFirst) {
+    const [, h, m, sec, d, mo, y] = viTimeFirst;
+    const date = new Date(Number(y), Number(mo) - 1, Number(d), Number(h), Number(m), Number(sec || 0));
+    if (!isNaN(date.getTime())) return date.toISOString();
+  }
+
+  // Định dạng Việt Nam: "12/10/2026 14:30:00" hoặc "12/10/2026 14:30" hoặc "12/10/2026"
+  const viDateFirst = s.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?$/);
+  if (viDateFirst) {
+    const [, d, mo, y, h, m, sec] = viDateFirst;
+    const date = new Date(Number(y), Number(mo) - 1, Number(d), Number(h || 0), Number(m || 0), Number(sec || 0));
+    if (!isNaN(date.getTime())) return date.toISOString();
+  }
+
+  return new Date().toISOString();
+}
+
 // Hàm chuẩn hóa và ánh xạ Chủ đề môn Tin học theo Bộ sách Kết nối tri thức và cuộc sống (K6-K9)
 export function normalizeKNTTTopic(rawTopic: string, gradeLevel: number = 6): string {
   const t = (rawTopic || '').trim();
@@ -303,6 +341,24 @@ export class LMSStorageService {
   static importClasses(newClasses: ClassRoom[], replaceAll = true): void {
     if (!newClasses || newClasses.length === 0) return;
 
+    // Lọc và chỉ giữ lại những lớp học thực tế hợp lệ (Khối 6-9, định dạng như 6/1, 6A, 7/2, 8/7, 9/1, v.v.)
+    const validNewClasses = newClasses.filter((c) => {
+      if (!c || !c.name) return false;
+      const clean = c.name.trim().replace(/^(lớp|lop)\s+/i, '');
+      return /^[6-9][\/\.\-_A-Za-z0-9]+$/i.test(clean);
+    });
+    if (validNewClasses.length === 0) return;
+
+    // Loại bỏ trùng lặp tên lớp
+    const uniqueMap = new Map<string, ClassRoom>();
+    validNewClasses.forEach((c) => {
+      const clean = c.name.trim().toLowerCase().replace(/^(lớp|lop)\s+/i, '');
+      if (!uniqueMap.has(clean)) {
+        uniqueMap.set(clean, c);
+      }
+    });
+    const sanitizedClasses = Array.from(uniqueMap.values());
+
     const existing = getStored<ClassRoom[]>(STORAGE_KEYS.CLASSES, INITIAL_CLASSES);
     const existingMap = new Map<string, ClassRoom>();
     const nameToExisting = new Map<string, ClassRoom>();
@@ -315,7 +371,7 @@ export class LMSStorageService {
 
     if (replaceAll) {
       // Khi nạp từ Google Sheet, danh sách lớp mới là nguồn chân lý duy nhất (Source of Truth)
-      const finalClasses: ClassRoom[] = newClasses.map((c) => {
+      const finalClasses: ClassRoom[] = sanitizedClasses.map((c) => {
         const cleanName = c.name.trim().toLowerCase();
         const stripped = cleanName.replace(/^(lớp|lop)\s+/i, '');
         const prev = existingMap.get(c.id) || nameToExisting.get(cleanName) || nameToExisting.get(stripped);
@@ -336,6 +392,39 @@ export class LMSStorageService {
       });
 
       setStored(STORAGE_KEYS.CLASSES, finalClasses);
+
+      // Đồng bộ dọn dẹp phân công lớp học của các tài khoản để loại bỏ lớp cũ không còn tồn tại
+      const validIds = new Set(finalClasses.map((fc) => fc.id));
+      const users = this.getUsers();
+      let usersChanged = false;
+      const cleanedUsers = users.map((u) => {
+        let changed = false;
+        let newClassId = u.classId;
+        let newAssigned = u.assignedClassIds;
+
+        if (u.classId && !validIds.has(u.classId)) {
+          newClassId = undefined;
+          changed = true;
+        }
+        if (u.assignedClassIds) {
+          const filtered = u.assignedClassIds.filter((cid) => validIds.has(cid));
+          if (filtered.length !== u.assignedClassIds.length) {
+            newAssigned = filtered;
+            changed = true;
+          }
+        }
+        if (changed) {
+          usersChanged = true;
+          return { ...u, classId: newClassId, assignedClassIds: newAssigned };
+        }
+        return u;
+      });
+
+      if (usersChanged) {
+        setStored(STORAGE_KEYS.USERS, cleanedUsers);
+        notifyChange('users');
+      }
+
       this.refreshTeacherAssignmentsFromClasses();
       notifyChange('classes');
       return;
@@ -343,7 +432,7 @@ export class LMSStorageService {
 
     // Chế độ gộp nếu replaceAll = false
     const map = new Map<string, ClassRoom>(existingMap);
-    newClasses.forEach((c) => {
+    sanitizedClasses.forEach((c) => {
       const cleanName = c.name.trim().toLowerCase();
       const stripped = cleanName.replace(/^(lớp|lop)\s+/i, '');
       const existingId = nameToExisting.get(cleanName)?.id || nameToExisting.get(stripped)?.id;
@@ -443,9 +532,11 @@ export class LMSStorageService {
     let hasClassesChanged = false;
 
     // 1. Cập nhật assignedClassIds cho từng giáo viên dựa trên lớp học
+    const validClassIds = new Set(classes.map((c) => c.id));
     const updatedUsers = users.map((u) => {
       if (u.role === 'STUDENT') return u;
-      const myClassIds = new Set(u.assignedClassIds || []);
+      // Chỉ giữ lại những lớp hiện còn tồn tại trong hệ thống
+      const myClassIds = new Set((u.assignedClassIds || []).filter((id) => validClassIds.has(id)));
 
       classes.forEach((c) => {
         const isSubjectMatch = c.subjectTeacherName && this.isTeacherNameMatch(c.subjectTeacherName, u);
@@ -1115,18 +1206,70 @@ export class LMSStorageService {
   static importTests(newTests: Test[]): void {
     if (!Array.isArray(newTests) || newTests.length === 0) return;
     const existing = this.getTests();
+    const allQuestions = this.getQuestions();
     const map = new Map<string, Test>();
-    existing.forEach((t) => map.set(t.id, t));
+    const titleToId = new Map<string, string>();
+
+    existing.forEach((t) => {
+      map.set(t.id, t);
+      if (t.title) titleToId.set(t.title.trim().toLowerCase(), t.id);
+    });
+
     newTests.forEach((t) => {
-      const prev = map.get(t.id) || existing.find((e) => e.title.trim().toLowerCase() === t.title.trim().toLowerCase());
-      map.set(t.id, {
+      if (!t || !t.title) return;
+      const cleanTitle = t.title.trim().toLowerCase();
+      const existingId = map.has(t.id) ? t.id : titleToId.get(cleanTitle);
+      const targetId = existingId || t.id;
+      const prev = map.get(targetId);
+
+      // Đảm bảo danh sách ID câu hỏi luôn hợp lệ, không bao giờ để undefined
+      let questionIds: string[] = [];
+      if (Array.isArray(t.questionIds) && t.questionIds.length > 0) {
+        questionIds = t.questionIds;
+      } else if (prev && Array.isArray(prev.questionIds) && prev.questionIds.length > 0) {
+        questionIds = prev.questionIds;
+      } else if (t.variants?.[0]?.questionIds && t.variants[0].questionIds.length > 0) {
+        questionIds = t.variants[0].questionIds;
+      } else {
+        // Tự động gán câu hỏi phù hợp với khối lớp từ ngân hàng câu hỏi
+        const gradeQuestions = allQuestions.filter((q) => q.gradeLevel === (t.gradeLevel || 6));
+        const count = t.totalQuestions || 20;
+        questionIds = gradeQuestions.slice(0, count).map((q) => q.id);
+      }
+
+      const totalQuestions = questionIds.length > 0 ? questionIds.length : (t.totalQuestions || 20);
+      const variantCode = t.variants?.[0]?.code || (prev?.variants?.[0]?.code) || '101';
+      const variants: TestVariant[] = [
+        {
+          code: variantCode,
+          questionIds
+        }
+      ];
+
+      const mergedTest: Test = {
         ...prev,
         ...t,
-        variants: t.variants && t.variants.length > 0 ? t.variants : (prev?.variants || []),
-        questionIds: t.questionIds && t.questionIds.length > 0 ? t.questionIds : (prev?.questionIds || []),
-        matrix: t.matrix ? t.matrix : (prev?.matrix || t.matrix)
-      });
+        id: targetId,
+        totalQuestions,
+        totalPoints: t.totalPoints || prev?.totalPoints || 10,
+        questionIds,
+        variants,
+        createdBy: t.createdBy || prev?.createdBy || 'user-admin-01',
+        authorName: t.authorName || prev?.authorName || 'Giáo viên Tin học',
+        createdAt: t.createdAt || prev?.createdAt || new Date().toISOString().split('T')[0],
+        status: t.status === 'ARCHIVED' ? 'READY' : (t.status || 'READY'),
+        matrix: t.matrix || prev?.matrix || {
+          knowCount: Math.round(totalQuestions * 0.4),
+          understandCount: Math.round(totalQuestions * 0.3),
+          applyCount: Math.max(0, totalQuestions - Math.round(totalQuestions * 0.7)),
+          selectedTopics: []
+        }
+      };
+
+      map.set(targetId, mergedTest);
+      titleToId.set(cleanTitle, targetId);
     });
+
     const merged = Array.from(map.values());
     setStored(STORAGE_KEYS.TESTS, merged);
     notifyChange('tests');
@@ -1158,17 +1301,61 @@ export class LMSStorageService {
   static importAssignments(newAssignments: Assignment[]): void {
     if (!Array.isArray(newAssignments) || newAssignments.length === 0) return;
     const existing = this.getAssignments();
+    const tests = this.getTests();
+    const classes = this.getClasses();
     const map = new Map<string, Assignment>();
-    existing.forEach((a) => map.set(a.id, a));
+    const titleToId = new Map<string, string>();
+
+    existing.forEach((a) => {
+      map.set(a.id, a);
+      if (a.testTitle) titleToId.set(a.testTitle.trim().toLowerCase(), a.id);
+    });
+
     newAssignments.forEach((a) => {
-      const prev = map.get(a.id) || existing.find((e) => e.testTitle.trim().toLowerCase() === a.testTitle.trim().toLowerCase());
-      map.set(a.id, {
+      if (!a || !a.testTitle) return;
+      const cleanTitle = a.testTitle.trim().toLowerCase();
+      const existingId = map.has(a.id) ? a.id : titleToId.get(cleanTitle);
+      const targetId = existingId || a.id;
+      const prev = map.get(targetId);
+
+      // Đối chiếu đề thi tương ứng
+      const matchedTest = tests.find(
+        (t) => t.title.trim().toLowerCase() === cleanTitle || t.id === a.testId
+      );
+      const testId = matchedTest?.id || (a.testId && a.testId.startsWith('test-') ? a.testId : (tests[0]?.id || `test-${targetId}`));
+
+      // Đối chiếu danh sách lớp
+      const classNames = a.classNames && a.classNames.length > 0
+        ? a.classNames
+        : (prev?.classNames || (classes[0] ? [classes[0].name] : ['6/1']));
+
+      const classIds = classNames
+        .map((cn) => classes.find((c) => c.name === cn)?.id || `cls-${cn.replace('/', '-')}`)
+        .filter(Boolean);
+
+      const mergedAssignment: Assignment = {
         ...prev,
         ...a,
-        classIds: a.classIds && a.classIds.length > 0 ? a.classIds : (prev?.classIds || []),
-        classNames: a.classNames && a.classNames.length > 0 ? a.classNames : (prev?.classNames || [])
-      });
+        id: targetId,
+        testId,
+        testTitle: matchedTest?.title || a.testTitle,
+        gradeLevel: matchedTest?.gradeLevel || a.gradeLevel || 6,
+        classNames,
+        classIds: classIds.length > 0 ? classIds : (prev?.classIds || [classes[0]?.id || 'cls-6-1']),
+        startTime: parseDateTimeFlexible(a.startTime || prev?.startTime),
+        endTime: parseDateTimeFlexible(a.endTime || prev?.endTime),
+        password: a.password === 'Không có' ? undefined : (a.password || prev?.password),
+        allowReviewAfterSubmit: a.allowReviewAfterSubmit ?? prev?.allowReviewAfterSubmit ?? true,
+        shuffleQuestions: a.shuffleQuestions ?? prev?.shuffleQuestions ?? true,
+        assignedByName: a.assignedByName || prev?.assignedByName || 'Giáo viên',
+        createdAt: a.createdAt || prev?.createdAt || new Date().toISOString().split('T')[0],
+        status: (a.status as any) === 'CLOSED' ? 'CLOSED' : 'ACTIVE'
+      };
+
+      map.set(targetId, mergedAssignment);
+      titleToId.set(cleanTitle, targetId);
     });
+
     const merged = Array.from(map.values());
     setStored(STORAGE_KEYS.ASSIGNMENTS, merged);
     notifyChange('assignments');
