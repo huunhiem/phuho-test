@@ -18,6 +18,7 @@ import {
 import { Assignment, Test, Question, User, Submission } from '../../types';
 import { LMSStorageService } from '../../services/storage';
 import { GoogleDriveService } from '../../services/googleDriveService';
+import { GoogleSheetsService } from '../../services/googleSheetsService';
 
 interface ExamRoomProps {
   assignment: Assignment;
@@ -287,6 +288,11 @@ export const ExamRoom: React.FC<ExamRoomProps> = ({
     };
 
     LMSStorageService.addSubmission(submission);
+    GoogleSheetsService.triggerAutoSync('submissions');
+    GoogleSheetsService.postToAppsScript({
+      action: 'addSubmission',
+      ...submission
+    }).catch(() => {});
 
     // Clear local backup
     localStorage.removeItem(`exam_progress_${currentUser.id}_${assignment.id}`);

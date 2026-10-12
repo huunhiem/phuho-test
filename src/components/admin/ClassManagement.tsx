@@ -96,8 +96,14 @@ export const ClassManagement: React.FC = () => {
   // Sĩ số học sinh thực tế trong hệ thống cho mỗi lớp
   const actualStudentCountByClass: Record<string, number> = {};
   users.forEach((u) => {
-    if (u.role === 'STUDENT' && u.classId && u.status !== 'DELETED') {
-      actualStudentCountByClass[u.classId] = (actualStudentCountByClass[u.classId] || 0) + 1;
+    const cid = u.classId;
+    if (u.role === 'STUDENT' && cid && u.status !== 'DELETED') {
+      const matched = classes.find((c) => c.id === cid || c.name === cid || c.name.replace('/', '-') === cid.replace('cls-', ''));
+      if (matched) {
+        actualStudentCountByClass[matched.id] = (actualStudentCountByClass[matched.id] || 0) + 1;
+      } else {
+        actualStudentCountByClass[cid] = (actualStudentCountByClass[cid] || 0) + 1;
+      }
     }
   });
 
@@ -199,9 +205,11 @@ export const ClassManagement: React.FC = () => {
 
       showToast(`✓ Đã cập nhật Lớp ${updated.name} và phân công giảng dạy (Đồng bộ Google Sheet)!`);
     } else {
+      const cleanName = formData.name.trim();
+      const stableId = `cls-${cleanName.replace(/[^a-zA-Z0-9]/g, '-')}`;
       const newClass: ClassRoom = {
-        id: `cls-${formData.gradeLevel}-${Date.now().toString(36)}`,
-        name: formData.name.trim(),
+        id: stableId,
+        name: cleanName,
         gradeId: `grade-${formData.gradeLevel}`,
         academicYearId: 'ay-2025-2026',
         homeroomTeacherId: formData.homeroomTeacherId,
@@ -372,7 +380,7 @@ export const ClassManagement: React.FC = () => {
   // Tải danh sách Lớp học và Phân công từ Google Sheet về
   const handlePullFromGoogleSheet = async () => {
     setIsPulling(true);
-    setSyncMessage('Đang tải danh sách Lớp học và Phân công từ Google Sheet (sheet LopHoc)...');
+    setSyncMessage('Đang lấy dữ liệu Khối & Lớp học và Phân công từ sheet LopHoc trên Google Sheet...');
     try {
       const sheetId = getSavedSheetId();
       const token = getGoogleAccessToken();
@@ -390,8 +398,8 @@ export const ClassManagement: React.FC = () => {
       }
 
       refreshData();
-      setSyncMessage(`✓ Đã nạp thành công ${count} lớp học từ Google Sheet về hệ thống!`);
-      showToast(`✓ Đã cập nhật ${count} lớp học từ Google Sheet!`);
+      setSyncMessage(`✓ Đã nạp thành công ${count} lớp học và phân công từ sheet LopHoc về giao diện!`);
+      showToast(`✓ Đã lấy thành công ${count} lớp học từ Sheet LopHoc hiển thị ở giao diện!`);
     } catch (err: any) {
       setSyncMessage(`Lỗi tải từ Google Sheet: ${err.message || String(err)}`);
     } finally {
@@ -464,11 +472,11 @@ export const ClassManagement: React.FC = () => {
             type="button"
             onClick={handlePullFromGoogleSheet}
             disabled={isPulling}
-            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-200 rounded-lg transition-colors disabled:opacity-50"
-            title="Tải dữ liệu lớp học từ Google Sheet về LMS"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-indigo-700 hover:bg-indigo-800 border border-indigo-700 rounded-lg shadow-xs transition-colors disabled:opacity-50"
+            title="Lấy trực tiếp danh sách lớp học và phân công từ sheet LopHoc trên Google Sheet và hiển thị lên giao diện"
           >
             {isPulling ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <DownloadCloud className="w-3.5 h-3.5" />}
-            <span>Tải từ Sheet</span>
+            <span>Lấy dữ liệu từ Sheet LopHoc</span>
           </button>
         </div>
       </div>
@@ -617,13 +625,27 @@ export const ClassManagement: React.FC = () => {
             const actualCount = actualStudentCountByClass[cls.id] || 0;
             const gNum = cls.name.split('/')[0] || '6';
 
-            // Danh sách giáo viên phụ trách lớp này
-            const assignedTeachersForThisClass = teachers.filter(
-              (t) =>
+            // Danh sách giáo viên phụ trách lớp này (đối chiếu ID hoặc đối chiếu tên từ Sheet LopHoc)
+            const assignedTeachersForThisClass = teachers.filter((t) => {
+              const isMatchId =
                 t.assignedClassIds?.includes(cls.id) ||
                 cls.assignedTeacherIds?.includes(t.id) ||
-                cls.subjectTeacherId === t.id
-            );
+                cls.subjectTeacherId === t.id;
+              if (isMatchId) return true;
+              if (cls.subjectTeacherName) {
+                const sName = cls.subjectTeacherName.toLowerCase().trim();
+                const tName = (t.fullName || '').toLowerCase().trim();
+                const tUser = (t.username || '').toLowerCase().trim();
+                const tCode = (t.teacherCode || '').toLowerCase().trim();
+                return (
+                  sName.includes(tName) ||
+                  (tName && tName.includes(sName)) ||
+                  sName.includes(tUser) ||
+                  (tCode && sName.includes(tCode))
+                );
+              }
+              return false;
+            });
 
             return (
               <div
@@ -719,6 +741,10 @@ export const ClassManagement: React.FC = () => {
                               </span>
                             ))}
                           </div>
+                        ) : cls.subjectTeacherName ? (
+                          <span className="text-[11px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-100 px-2 py-0.5 rounded">
+                            {cls.subjectTeacherName}
+                          </span>
                         ) : (
                           <span className="text-[11px] text-amber-600 font-medium bg-amber-50 px-2 py-0.5 rounded">
                             Chưa phân công GV

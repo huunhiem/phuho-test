@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Send,
   Plus,
@@ -21,6 +21,7 @@ import { Assignment, Test, User, ClassRoom } from '../../types';
 import { LMSStorageService } from '../../services/storage';
 import { GoogleSheetsService } from '../../services/googleSheetsService';
 import { ConfirmDialog } from '../common/ConfirmDialog';
+import { onStorageChange } from '../../services/storageEvents';
 
 interface AssignmentManagerProps {
   currentUser: User;
@@ -28,23 +29,54 @@ interface AssignmentManagerProps {
 
 export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUser }) => {
   const isPrivileged = currentUser.role === 'ADMIN' || currentUser.role === 'PRINCIPAL';
+  const [, setTick] = useState(0);
+
+  useEffect(() => {
+    return onStorageChange((entity) => {
+      if (entity === 'assignments' || entity === 'classes' || entity === 'tests' || entity === 'all') {
+        setAssignments(LMSStorageService.getAssignments());
+        setTick((t) => t + 1);
+      }
+    });
+  }, []);
+
   const allClasses = LMSStorageService.getClasses();
-  const classes = isPrivileged
-    ? allClasses
-    : allClasses.filter((c) => currentUser.assignedClassIds?.includes(c.id));
+  const classes = LMSStorageService.getClassesForTeacher(currentUser);
 
   const allTests = LMSStorageService.getTests();
-  // Giáo viên chỉ thấy các đề thi do chính mình tạo ra
+  // Giáo viên thấy các đề thi do chính mình tạo ra hoặc mang tên mình
   const tests = isPrivileged
     ? allTests
-    : allTests.filter((t) => t.createdBy === currentUser.id);
+    : allTests.filter((t) => {
+        if (t.createdBy === currentUser.id) return true;
+        const authName = (t.authorName || '').toLowerCase().trim();
+        const uFull = (currentUser.fullName || '').toLowerCase().trim();
+        const uUser = (currentUser.username || '').toLowerCase().trim();
+        if (authName && (authName === uFull || authName === uUser || authName.includes(uFull) || uFull.includes(authName))) {
+          return true;
+        }
+        return false;
+      });
 
   const [assignments, setAssignments] = useState<Assignment[]>(() => LMSStorageService.getAssignments());
 
-  // Giáo viên chỉ thấy các đợt kiểm tra do chính mình giao
+  // Giáo viên thấy các đợt kiểm tra do chính mình giao hoặc giao cho lớp phụ trách
   const visibleAssignments = isPrivileged
     ? assignments
-    : assignments.filter((a) => a.assignedBy === currentUser.id);
+    : assignments.filter((a) => {
+        if (a.assignedBy === currentUser.id) return true;
+        const abName = (a.assignedByName || '').toLowerCase().trim();
+        const uFull = (currentUser.fullName || '').toLowerCase().trim();
+        const uUser = (currentUser.username || '').toLowerCase().trim();
+        if (abName && (abName === uFull || abName === uUser || abName.includes(uFull) || uFull.includes(abName))) {
+          return true;
+        }
+        const myClassNames = new Set(classes.map((c) => c.name));
+        const myClassIds = new Set(classes.map((c) => c.id));
+        if (a.classNames?.some((cn) => myClassNames.has(cn))) return true;
+        if (a.classIds?.some((cid) => myClassIds.has(cid))) return true;
+        return false;
+      });
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingAssign, setEditingAssign] = useState<Assignment | null>(null);

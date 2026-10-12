@@ -93,6 +93,24 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
           setError('Tài khoản này hiện đang bị khóa. Vui lòng liên hệ Quản trị viên!');
           return;
         }
+
+        // Tự động khôi phục ảnh đại diện lưu trong bộ nhớ cục bộ nếu có
+        const localAvatar = localStorage.getItem(`user_avatar_${matched.username.toLowerCase()}`);
+        if (localAvatar && !matched.avatarUrl) {
+          matched = { ...matched, avatarUrl: localAvatar };
+        }
+
+        // Đảm bảo các lớp phân công theo tên trong Sheet LopHoc được liên kết đầy đủ
+        if (matched.role !== 'STUDENT') {
+          const teacherClasses = LMSStorageService.getClassesForTeacher(matched);
+          const teacherClassIds = teacherClasses.map((c) => c.id);
+          const mergedIds = Array.from(new Set([...(matched.assignedClassIds || []), ...teacherClassIds]));
+          if (mergedIds.length > (matched.assignedClassIds || []).length) {
+            matched = { ...matched, assignedClassIds: mergedIds };
+            LMSStorageService.updateUser(matched);
+          }
+        }
+
         onLoginSuccess(matched);
       } else {
         setError('Tên đăng nhập hoặc Mật khẩu không chính xác!');

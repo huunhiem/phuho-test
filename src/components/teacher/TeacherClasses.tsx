@@ -1,23 +1,24 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { GraduationCap, Users, UserCheck, Search, Award } from 'lucide-react';
 import { User, ClassRoom } from '../../types';
 import { LMSStorageService } from '../../services/storage';
+import { onStorageChange } from '../../services/storageEvents';
 
 interface TeacherClassesProps {
   currentUser: User;
 }
 
 export const TeacherClasses: React.FC<TeacherClassesProps> = ({ currentUser }) => {
-  const allClasses = LMSStorageService.getClasses();
-  const isPrivileged = currentUser.role === 'ADMIN' || currentUser.role === 'PRINCIPAL';
-  const classes = isPrivileged
-    ? allClasses
-    : allClasses.filter((c) =>
-        currentUser.assignedClassIds?.includes(c.id) ||
-        c.homeroomTeacherId === currentUser.id ||
-        c.subjectTeacherId === currentUser.id ||
-        c.assignedTeacherIds?.includes(currentUser.id)
-      );
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    return onStorageChange((entity) => {
+      if (entity === 'classes' || entity === 'users' || entity === 'all') {
+        setTick((t) => t + 1);
+      }
+    });
+  }, []);
+
+  const classes = LMSStorageService.getClassesForTeacher(currentUser);
 
   const users = LMSStorageService.getUsers();
   const submissions = LMSStorageService.getSubmissions();

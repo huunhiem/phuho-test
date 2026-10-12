@@ -139,9 +139,10 @@ export const AccountProfileModal: React.FC<AccountProfileModalProps> = ({
         }
 
         // Tự động lưu ngay lập tức vào tài khoản và đồng bộ để người dùng thoát ra vào lại vẫn giữ nguyên 100%
+        localStorage.setItem(`user_avatar_${currentUser.username.toLowerCase()}`, finalAvatarUrl || effectivePreview);
         const updatedUser: User = {
           ...currentUser,
-          avatarUrl: finalAvatarUrl
+          avatarUrl: finalAvatarUrl || effectivePreview
         };
         LMSStorageService.updateUser(updatedUser);
         LMSStorageService.setCurrentUser(updatedUser);
@@ -196,9 +197,22 @@ export const AccountProfileModal: React.FC<AccountProfileModalProps> = ({
         avatarUrl: avatarUrl.trim() || undefined
       };
 
+      if (updatedUser.avatarUrl) {
+        localStorage.setItem(`user_avatar_${currentUser.username.toLowerCase()}`, updatedUser.avatarUrl);
+      }
+
       LMSStorageService.updateUser(updatedUser);
       LMSStorageService.setCurrentUser(updatedUser);
       GoogleSheetsService.triggerAutoSync('users');
+      GoogleSheetsService.postToAppsScript({
+        action: 'updateUser',
+        id: updatedUser.id,
+        username: updatedUser.username,
+        fullName: updatedUser.fullName,
+        email: updatedUser.email,
+        phone: updatedUser.phone,
+        avatarUrl: updatedUser.avatarUrl
+      }).catch(() => {});
       onUserUpdated(updatedUser);
 
       setSuccessMessage('✓ Đã cập nhật thông tin tài khoản thành công!');

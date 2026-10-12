@@ -416,7 +416,13 @@ function doGet(e) {
 
   // 0. Kiểm tra kết nối
   if (action === 'ping' || action === 'testConnection') {
-    return jsonResponse({ success: true, message: 'Google Apps Script hoạt động tốt!', spreadsheetName: ss.getName() });
+    return jsonResponse({
+      success: true,
+      message: 'Google Apps Script hoạt động tốt!',
+      spreadsheetName: ss.getName(),
+      spreadsheetId: ss.getId(),
+      spreadsheetUrl: ss.getUrl()
+    });
   }
   
   // 1. Lấy toàn bộ tài khoản & mật khẩu
@@ -481,6 +487,22 @@ function doGet(e) {
   if (action === 'getTests' || action === 'getDeThi') {
     var sheet = ss.getSheetByName('DeThi');
     if (!sheet) return jsonResponse({ error: 'Chưa có sheet DeThi' });
+    var data = sheet.getDataRange().getValues();
+    return jsonResponse(data);
+  }
+
+  // 8. Lấy danh sách đợt giao đề
+  if (action === 'getAssignments' || action === 'getGiaoDe') {
+    var sheet = ss.getSheetByName('GiaoDe');
+    if (!sheet) return jsonResponse({ error: 'Chưa có sheet GiaoDe' });
+    var data = sheet.getDataRange().getValues();
+    return jsonResponse(data);
+  }
+
+  // 9. Lấy danh sách giáo viên & phân công
+  if (action === 'getTeachers' || action === 'getGiaoVien') {
+    var sheet = ss.getSheetByName('GiaoVien');
+    if (!sheet) return jsonResponse({ error: 'Chưa có sheet GiaoVien' });
     var data = sheet.getDataRange().getValues();
     return jsonResponse(data);
   }

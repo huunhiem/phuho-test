@@ -312,11 +312,109 @@ export class LMSStorageService {
   static importClasses(newClasses: ClassRoom[]): void {
     const existing = this.getClasses();
     const map = new Map<string, ClassRoom>();
-    existing.forEach((c) => map.set(c.id, c));
-    newClasses.forEach((c) => map.set(c.id, c));
+    // Map existing by ID and also keep a name lookup
+    const nameToId = new Map<string, string>();
+    existing.forEach((c) => {
+      map.set(c.id, c);
+      nameToId.set(c.name.trim().toLowerCase(), c.id);
+    });
+
+    newClasses.forEach((c) => {
+      const cleanName = c.name.trim().toLowerCase();
+      // If a class with the same name already exists, keep the existing ID
+      const existingId = nameToId.get(cleanName);
+      const targetId = existingId || c.id;
+      const prev = map.get(targetId);
+
+      const mergedClass: ClassRoom = {
+        ...prev,
+        ...c,
+        id: targetId,
+        homeroomTeacherId: c.homeroomTeacherId || prev?.homeroomTeacherId,
+        homeroomTeacherName: c.homeroomTeacherName || prev?.homeroomTeacherName,
+        subjectTeacherId: c.subjectTeacherId || prev?.subjectTeacherId,
+        subjectTeacherName: c.subjectTeacherName || prev?.subjectTeacherName,
+        assignedTeacherIds: Array.from(new Set([...(prev?.assignedTeacherIds || []), ...(c.assignedTeacherIds || [])]))
+      };
+
+      map.set(targetId, mergedClass);
+      nameToId.set(cleanName, targetId);
+    });
+
     const merged = Array.from(map.values());
     setStored(STORAGE_KEYS.CLASSES, merged);
     notifyChange('classes');
+  }
+
+  /**
+   * Lấy danh sách lớp phụ trách của một giáo viên hoặc quản trị viên
+   * Hỗ trợ tìm kiếm theo ID lớp, ID giáo viên, và đối chiếu tên hiển thị từ Google Sheet LopHoc
+   */
+  static getClassesForTeacher(user: User): ClassRoom[] {
+    const allClasses = this.getClasses();
+    if (!user) return [];
+    if (user.role === 'ADMIN' || user.role === 'PRINCIPAL') {
+      return allClasses;
+    }
+
+    const tFull = (user.fullName || '').toLowerCase().trim();
+    const tUser = (user.username || '').toLowerCase().trim();
+    const tCode = (user.teacherCode || '').toLowerCase().trim();
+    const assignedIds = new Set(user.assignedClassIds || []);
+
+    return allClasses.filter((c) => {
+      // 1. Giáo viên có class.id hoặc class.name trong assignedClassIds
+      if (assignedIds.has(c.id) || assignedIds.has(c.name)) return true;
+
+      // 2. Class có ID giáo viên trong assignedTeacherIds hoặc subjectTeacherId hoặc homeroomTeacherId
+      if (
+        c.assignedTeacherIds?.includes(user.id) ||
+        c.subjectTeacherId === user.id ||
+        c.homeroomTeacherId === user.id
+      ) {
+        return true;
+      }
+
+      // 3. Đối chiếu tên giáo viên phân công từ cột 5 của Sheet LopHoc (subjectTeacherName)
+      const subjName = (c.subjectTeacherName || '').toLowerCase().trim();
+      if (subjName) {
+        if (
+          subjName === tFull ||
+          subjName === tUser ||
+          (tCode && subjName === tCode) ||
+          subjName.includes(tFull) ||
+          (tFull && tFull.includes(subjName)) ||
+          subjName.includes(tUser)
+        ) {
+          return true;
+        }
+        // Trường hợp phân công nhiều giáo viên: "Võ Hoàng Long, Lê Thị Mai"
+        const teacherNames = subjName.split(/[,;/+]/).map((s) => s.trim()).filter(Boolean);
+        if (
+          teacherNames.some(
+            (n) => n === tFull || n === tUser || (tFull && (tFull.includes(n) || n.includes(tFull)))
+          )
+        ) {
+          return true;
+        }
+      }
+
+      // 4. Đối chiếu tên giáo viên chủ nhiệm
+      const homeName = (c.homeroomTeacherName || '').toLowerCase().trim();
+      if (homeName) {
+        if (
+          homeName === tFull ||
+          homeName === tUser ||
+          (tCode && homeName === tCode) ||
+          homeName.includes(tFull) ||
+          (tFull && tFull.includes(homeName))
+        ) {
+          return true;
+        }
+      }
+
+      return false;
+    });
   }
 
   // Phân công giáo viên phụ trách các lớp học
@@ -331,25 +429,38 @@ export class LMSStorageService {
     });
     setStored(STORAGE_KEYS.USERS, updatedUsers);
 
+    // Cập nhật người dùng hiện tại nếu đang đăng nhập đúng tài khoản này
+    const current = this.getCurrentUser();
+    if (current && current.id === teacherId) {
+      this.setCurrentUser({ ...current, assignedClassIds: classIds });
+    }
+
     const classes = this.getClasses();
     const updatedClasses = classes.map((c) => {
       const isAssigned = classIds.includes(c.id);
       const assignedSet = new Set(c.assignedTeacherIds || []);
       if (isAssigned) {
         assignedSet.add(teacherId);
+        // Lấy danh sách giáo viên phụ trách để cập nhật tên đầy đủ
+        const assignedTeachers = updatedUsers.filter((u) => assignedSet.has(u.id));
+        const allNames = assignedTeachers.map((t) => t.fullName).filter(Boolean).join(', ');
+
         return {
           ...c,
           assignedTeacherIds: Array.from(assignedSet),
-          subjectTeacherId: c.subjectTeacherId || teacherId,
-          subjectTeacherName: c.subjectTeacherName || teacher?.fullName
+          subjectTeacherId: teacherId,
+          subjectTeacherName: allNames || teacher?.fullName || c.subjectTeacherName
         };
       } else {
         assignedSet.delete(teacherId);
+        const assignedTeachers = updatedUsers.filter((u) => assignedSet.has(u.id));
+        const remainingNames = assignedTeachers.map((t) => t.fullName).filter(Boolean).join(', ');
+
         return {
           ...c,
           assignedTeacherIds: Array.from(assignedSet),
-          subjectTeacherId: c.subjectTeacherId === teacherId ? undefined : c.subjectTeacherId,
-          subjectTeacherName: c.subjectTeacherId === teacherId ? undefined : c.subjectTeacherName
+          subjectTeacherId: c.subjectTeacherId === teacherId ? (assignedTeachers[0]?.id) : c.subjectTeacherId,
+          subjectTeacherName: remainingNames || (c.subjectTeacherId === teacherId ? undefined : c.subjectTeacherName)
         };
       }
     });
@@ -507,25 +618,43 @@ export class LMSStorageService {
     const deletedIds = this.getDeletedUserIds();
     const existing = this.getUsers();
     const userMap = new Map<string, User>();
-    existing.forEach((u) => userMap.set(u.id, u));
+    const usernameToId = new Map<string, string>();
+
+    existing.forEach((u) => {
+      userMap.set(u.id, u);
+      if (u.username) {
+        usernameToId.set(u.username.toLowerCase(), u.id);
+      }
+    });
 
     newStudents.forEach((u) => {
       // If newly imported, ensure it is unflagged from deleted IDs
       deletedIds.delete(u.id);
-      const prev =
-        userMap.get(u.id) ||
-        existing.find(
-          (e) =>
-            Boolean(e.username && u.username) &&
-            e.username.toLowerCase() === u.username.toLowerCase()
-        );
+      const cleanUsername = (u.username || '').toLowerCase();
+      const existingId = usernameToId.get(cleanUsername);
+      const targetId = existingId || u.id;
+      const prev = userMap.get(targetId);
 
-      userMap.set(u.id, {
+      const mergedUser: User = {
         ...prev,
         ...u,
+        id: targetId,
         // Bảo tồn avatarUrl đã có nếu lượt import này chưa có avatar
-        avatarUrl: u.avatarUrl || prev?.avatarUrl
-      });
+        avatarUrl: u.avatarUrl || prev?.avatarUrl,
+        // Bảo tồn assignedClassIds nếu lượt import này không có
+        assignedClassIds: (u.assignedClassIds && u.assignedClassIds.length > 0)
+          ? u.assignedClassIds
+          : (prev?.assignedClassIds || []),
+        password: u.password || prev?.password || (u.role === 'STUDENT' ? '123456' : 'phuho@2025')
+      };
+
+      // If ID changed to match existing username, clean up any old key
+      if (existingId && existingId !== u.id && userMap.has(u.id)) {
+        userMap.delete(u.id);
+      }
+
+      userMap.set(targetId, mergedUser);
+      if (cleanUsername) usernameToId.set(cleanUsername, targetId);
     });
 
     setStored(STORAGE_KEYS.DELETED_USER_IDS, Array.from(deletedIds));
@@ -817,6 +946,26 @@ export class LMSStorageService {
     notifyChange('tests');
   }
 
+  static importTests(newTests: Test[]): void {
+    if (!Array.isArray(newTests) || newTests.length === 0) return;
+    const existing = this.getTests();
+    const map = new Map<string, Test>();
+    existing.forEach((t) => map.set(t.id, t));
+    newTests.forEach((t) => {
+      const prev = map.get(t.id) || existing.find((e) => e.title.trim().toLowerCase() === t.title.trim().toLowerCase());
+      map.set(t.id, {
+        ...prev,
+        ...t,
+        variants: t.variants && t.variants.length > 0 ? t.variants : (prev?.variants || []),
+        questionIds: t.questionIds && t.questionIds.length > 0 ? t.questionIds : (prev?.questionIds || []),
+        matrix: t.matrix ? t.matrix : (prev?.matrix || t.matrix)
+      });
+    });
+    const merged = Array.from(map.values());
+    setStored(STORAGE_KEYS.TESTS, merged);
+    notifyChange('tests');
+  }
+
   // Assignments
   static getAssignments(): Assignment[] {
     return getStored<Assignment[]>(STORAGE_KEYS.ASSIGNMENTS, INITIAL_ASSIGNMENTS);
@@ -837,6 +986,25 @@ export class LMSStorageService {
   static deleteAssignment(id: string): void {
     const list = this.getAssignments().filter((item) => item.id !== id);
     setStored(STORAGE_KEYS.ASSIGNMENTS, list);
+    notifyChange('assignments');
+  }
+
+  static importAssignments(newAssignments: Assignment[]): void {
+    if (!Array.isArray(newAssignments) || newAssignments.length === 0) return;
+    const existing = this.getAssignments();
+    const map = new Map<string, Assignment>();
+    existing.forEach((a) => map.set(a.id, a));
+    newAssignments.forEach((a) => {
+      const prev = map.get(a.id) || existing.find((e) => e.testTitle.trim().toLowerCase() === a.testTitle.trim().toLowerCase());
+      map.set(a.id, {
+        ...prev,
+        ...a,
+        classIds: a.classIds && a.classIds.length > 0 ? a.classIds : (prev?.classIds || []),
+        classNames: a.classNames && a.classNames.length > 0 ? a.classNames : (prev?.classNames || [])
+      });
+    });
+    const merged = Array.from(map.values());
+    setStored(STORAGE_KEYS.ASSIGNMENTS, merged);
     notifyChange('assignments');
   }
 

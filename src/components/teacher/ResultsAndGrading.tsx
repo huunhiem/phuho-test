@@ -65,13 +65,25 @@ export const ResultsAndGrading: React.FC<ResultsAndGradingProps> = ({ currentUse
   }, []);
 
   const isPrivileged = currentUser.role === 'ADMIN' || currentUser.role === 'PRINCIPAL';
+  const visibleClasses = LMSStorageService.getClassesForTeacher(currentUser);
+
+  const uFull = (currentUser.fullName || '').toLowerCase().trim();
+  const uUser = (currentUser.username || '').toLowerCase().trim();
+  const myClassNames = new Set(visibleClasses.map((c) => c.name));
+  const myClassIds = new Set(visibleClasses.map((c) => c.id));
+
   const visibleAssignments = isPrivileged
     ? assignments
-    : assignments.filter((a) => a.assignedBy === currentUser.id);
-
-  const visibleClasses = isPrivileged
-    ? classes
-    : classes.filter((c) => currentUser.assignedClassIds?.includes(c.id));
+    : assignments.filter((a) => {
+        if (a.assignedBy === currentUser.id) return true;
+        const abName = (a.assignedByName || '').toLowerCase().trim();
+        if (abName && (abName === uFull || abName === uUser || abName.includes(uFull) || uFull.includes(abName))) {
+          return true;
+        }
+        if (a.classNames?.some((cn) => myClassNames.has(cn))) return true;
+        if (a.classIds?.some((cid) => myClassIds.has(cid))) return true;
+        return false;
+      });
 
   // Compute detailed participation report using LMSStorageService
   const report = useMemo(() => {

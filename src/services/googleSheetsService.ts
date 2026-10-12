@@ -801,23 +801,28 @@ export class GoogleSheetsService {
   static buildLopHocRows(): any[][] {
     const classes = LMSStorageService.getClasses();
     const users = LMSStorageService.getUsers();
-    const teachers = users.filter((u) => u.role === 'TEACHER' || u.role === 'DEPARTMENT_HEAD');
+    const staff = users.filter((u) => u.role !== 'STUDENT');
 
     return [
       ['ID', 'Tên lớp', 'Khối', 'Sĩ số', 'Giáo viên chủ nhiệm', 'Giáo viên phân công môn Tin học'],
       ...classes.map((c) => {
-        const assignedTeachers = teachers.filter((t) =>
+        const assignedTeachers = staff.filter((t) =>
           t.assignedClassIds?.includes(c.id) ||
           c.assignedTeacherIds?.includes(t.id) ||
           c.subjectTeacherId === t.id
         );
-        const assignedTeacherNames = assignedTeachers.map((t) => t.fullName).join(', ') || c.subjectTeacherName || c.homeroomTeacherName || '';
+        let assignedTeacherNames = assignedTeachers.map((t) => t.fullName).filter(Boolean).join(', ');
+        if (!assignedTeacherNames) {
+          assignedTeacherNames = c.subjectTeacherName || c.homeroomTeacherName || '';
+        }
+
+        const stableId = c.id || `cls-${c.name.replace(/[^a-zA-Z0-9]/g, '-')}`;
 
         return [
-          c.id,
+          stableId,
           c.name,
           c.name.split('/')[0] || '6',
-          c.studentCount,
+          c.studentCount || 35,
           c.homeroomTeacherName || '',
           assignedTeacherNames
         ];
@@ -1503,35 +1508,62 @@ export class GoogleSheetsService {
     if (!rows || rows.length === 0) return 0;
 
     const users = LMSStorageService.getUsers();
-    const teachers = users.filter((u) => u.role === 'TEACHER' || u.role === 'DEPARTMENT_HEAD');
+    const existingClasses = LMSStorageService.getClasses();
+    const staff = users.filter((u) => u.role !== 'STUDENT');
     const importedClasses: ClassRoom[] = [];
     const teacherAssignments: Record<string, string[]> = {};
 
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
-      if (!row || !row[1]) continue;
-      const id = String(row[0] || `cls-${Date.now()}-${i}`);
-      let name = String(row[1] || '6/1').trim();
+      if (!row || (!row[0] && !row[1])) continue;
+
+      let name = String(row[1] || row[0] || '6/1').trim();
+      // Bỏ qua dòng tiêu đề nếu có
+      if (name.toLowerCase() === 'tên lớp' || name.toLowerCase() === 'lớp') continue;
+
       if (name.includes('T') && name.includes('-')) {
         const d = new Date(name);
         if (!isNaN(d.getTime())) {
           name = `${d.getMonth() + 1}/${d.getDate()}`;
         }
       }
+
+      // Xác định ID lớp ổn định
+      const existingClass = existingClasses.find((c) => c.name.toLowerCase() === name.toLowerCase());
+      let id = existingClass?.id;
+      if (!id) {
+        const rawId = String(row[0] || '').trim();
+        if (rawId && rawId.startsWith('cls-')) {
+          id = rawId;
+        } else {
+          id = `cls-${name.replace(/[^a-zA-Z0-9]/g, '-')}`;
+        }
+      }
+
       const rawGrade = String(row[2] || name.split('/')[0] || '6');
       const gradeNum = parseInt(rawGrade.replace(/[^0-9]/g, ''), 10) || parseInt(name.split('/')[0], 10) || 6;
       const studentCount = parseInt(String(row[3] || '35'), 10) || 35;
       const homeroomTeacherName = String(row[4] || '').trim();
       const subjectTeacherName = String(row[5] || '').trim();
 
-      const matchedHomeroom = teachers.find(
-        (t) => t.fullName.toLowerCase() === homeroomTeacherName.toLowerCase() || t.username.toLowerCase() === homeroomTeacherName.toLowerCase()
-      );
+      const matchedHomeroom = staff.find((t) => {
+        const tf = (t.fullName || '').toLowerCase().trim();
+        const tu = (t.username || '').toLowerCase().trim();
+        const tc = (t.teacherCode || '').toLowerCase().trim();
+        const hn = homeroomTeacherName.toLowerCase().trim();
+        return tf === hn || tu === hn || (tc && tc === hn) || (hn && (hn.includes(tf) || tf.includes(hn)));
+      });
 
       const assignedTeacherIds: string[] = [];
-      const teacherNames = subjectTeacherName.split(/[,;]/).map((s) => s.trim().toLowerCase()).filter(Boolean);
-      teachers.forEach((t) => {
-        if (teacherNames.some((n) => t.fullName.toLowerCase() === n || t.username.toLowerCase() === n)) {
+      const teacherNames = subjectTeacherName.split(/[,;/+]/).map((s) => s.trim().toLowerCase()).filter(Boolean);
+      staff.forEach((t) => {
+        const tf = (t.fullName || '').toLowerCase().trim();
+        const tu = (t.username || '').toLowerCase().trim();
+        const tc = (t.teacherCode || '').toLowerCase().trim();
+        const isMatched = teacherNames.some((n) =>
+          tf === n || tu === n || (tc && tc === n) || tf.includes(n) || n.includes(tf) || tu.includes(n)
+        );
+        if (isMatched) {
           if (!assignedTeacherIds.includes(t.id)) {
             assignedTeacherIds.push(t.id);
             if (!teacherAssignments[t.id]) teacherAssignments[t.id] = [];
@@ -1541,7 +1573,7 @@ export class GoogleSheetsService {
       });
 
       const matchedSubjectTeacher = assignedTeacherIds.length > 0
-        ? teachers.find((t) => t.id === assignedTeacherIds[0])
+        ? staff.find((t) => t.id === assignedTeacherIds[0])
         : undefined;
 
       if (matchedHomeroom && !assignedTeacherIds.includes(matchedHomeroom.id)) {
@@ -1566,11 +1598,15 @@ export class GoogleSheetsService {
 
     if (importedClasses.length > 0) {
       LMSStorageService.importClasses(importedClasses);
+      const currentLoggedIn = LMSStorageService.getCurrentUser();
       Object.entries(teacherAssignments).forEach(([tId, cIds]) => {
         const tUser = users.find((u) => u.id === tId);
         if (tUser) {
           const mergedClasses = Array.from(new Set([...(tUser.assignedClassIds || []), ...cIds]));
           LMSStorageService.updateUser({ ...tUser, assignedClassIds: mergedClasses });
+          if (currentLoggedIn && currentLoggedIn.id === tId) {
+            LMSStorageService.setCurrentUser({ ...currentLoggedIn, assignedClassIds: mergedClasses });
+          }
         }
       });
       notifyChange('classes');
@@ -1600,35 +1636,62 @@ export class GoogleSheetsService {
 
       const rows = data.slice(1);
       const users = LMSStorageService.getUsers();
-      const teachers = users.filter((u) => u.role === 'TEACHER' || u.role === 'DEPARTMENT_HEAD');
+      const existingClasses = LMSStorageService.getClasses();
+      const staff = users.filter((u) => u.role !== 'STUDENT');
       const importedClasses: ClassRoom[] = [];
       const teacherAssignments: Record<string, string[]> = {};
 
       for (let i = 0; i < rows.length; i++) {
         const row = rows[i];
-        if (!row || !row[1]) continue;
-        const id = String(row[0] || `cls-${Date.now()}-${i}`);
-        let name = String(row[1] || '6/1').trim();
+        if (!row || (!row[0] && !row[1])) continue;
+
+        let name = String(row[1] || row[0] || '6/1').trim();
+        // Bỏ qua dòng tiêu đề nếu có
+        if (name.toLowerCase() === 'tên lớp' || name.toLowerCase() === 'lớp') continue;
+
         if (name.includes('T') && name.includes('-')) {
           const d = new Date(name);
           if (!isNaN(d.getTime())) {
             name = `${d.getMonth() + 1}/${d.getDate()}`;
           }
         }
+
+        // Xác định ID lớp ổn định
+        const existingClass = existingClasses.find((c) => c.name.toLowerCase() === name.toLowerCase());
+        let id = existingClass?.id;
+        if (!id) {
+          const rawId = String(row[0] || '').trim();
+          if (rawId && rawId.startsWith('cls-')) {
+            id = rawId;
+          } else {
+            id = `cls-${name.replace(/[^a-zA-Z0-9]/g, '-')}`;
+          }
+        }
+
         const rawGrade = String(row[2] || name.split('/')[0] || '6');
         const gradeNum = parseInt(rawGrade.replace(/[^0-9]/g, ''), 10) || parseInt(name.split('/')[0], 10) || 6;
         const studentCount = parseInt(String(row[3] || '35'), 10) || 35;
         const homeroom = String(row[4] || '').trim();
         const subjectTeacher = String(row[5] || '').trim();
 
-        const matchedHomeroom = teachers.find(
-          (t) => t.fullName.toLowerCase() === homeroom.toLowerCase() || t.username.toLowerCase() === homeroom.toLowerCase()
-        );
+        const matchedHomeroom = staff.find((t) => {
+          const tf = (t.fullName || '').toLowerCase().trim();
+          const tu = (t.username || '').toLowerCase().trim();
+          const tc = (t.teacherCode || '').toLowerCase().trim();
+          const hn = homeroom.toLowerCase().trim();
+          return tf === hn || tu === hn || (tc && tc === hn) || (hn && (hn.includes(tf) || tf.includes(hn)));
+        });
 
         const assignedTeacherIds: string[] = [];
-        const teacherNames = subjectTeacher.split(/[,;]/).map((s) => s.trim().toLowerCase()).filter(Boolean);
-        teachers.forEach((t) => {
-          if (teacherNames.some((n) => t.fullName.toLowerCase() === n || t.username.toLowerCase() === n)) {
+        const teacherNames = subjectTeacher.split(/[,;/+]/).map((s) => s.trim().toLowerCase()).filter(Boolean);
+        staff.forEach((t) => {
+          const tf = (t.fullName || '').toLowerCase().trim();
+          const tu = (t.username || '').toLowerCase().trim();
+          const tc = (t.teacherCode || '').toLowerCase().trim();
+          const isMatched = teacherNames.some((n) =>
+            tf === n || tu === n || (tc && tc === n) || tf.includes(n) || n.includes(tf) || tu.includes(n)
+          );
+          if (isMatched) {
             if (!assignedTeacherIds.includes(t.id)) {
               assignedTeacherIds.push(t.id);
               if (!teacherAssignments[t.id]) teacherAssignments[t.id] = [];
@@ -1638,7 +1701,7 @@ export class GoogleSheetsService {
         });
 
         const matchedSubjectTeacher = assignedTeacherIds.length > 0
-          ? teachers.find((t) => t.id === assignedTeacherIds[0])
+          ? staff.find((t) => t.id === assignedTeacherIds[0])
           : undefined;
 
         if (matchedHomeroom && !assignedTeacherIds.includes(matchedHomeroom.id)) {
@@ -1663,11 +1726,15 @@ export class GoogleSheetsService {
 
       if (importedClasses.length > 0) {
         LMSStorageService.importClasses(importedClasses);
+        const currentLoggedIn = LMSStorageService.getCurrentUser();
         Object.entries(teacherAssignments).forEach(([tId, cIds]) => {
           const tUser = users.find((u) => u.id === tId);
           if (tUser) {
             const mergedClasses = Array.from(new Set([...(tUser.assignedClassIds || []), ...cIds]));
             LMSStorageService.updateUser({ ...tUser, assignedClassIds: mergedClasses });
+            if (currentLoggedIn && currentLoggedIn.id === tId) {
+              LMSStorageService.setCurrentUser({ ...currentLoggedIn, assignedClassIds: mergedClasses });
+            }
           }
         });
         notifyChange('classes');
@@ -1677,6 +1744,300 @@ export class GoogleSheetsService {
       return { success: true, count: 0 };
     } catch (e: any) {
       return { success: false, count: 0, error: e.message || 'Lỗi đọc lớp học từ Apps Script' };
+    }
+  }
+
+  /**
+   * Tải danh sách Đề thi (DeThi) từ Google Sheet qua Apps Script
+   */
+  static async pullTestsFromAppsScript(): Promise<{ success: boolean; count: number; error?: string }> {
+    const scriptUrl = getAppsScriptUrl();
+    if (!scriptUrl) return { success: false, count: 0, error: 'Chưa có Apps Script URL' };
+    const sheetId = getSavedSheetId();
+    try {
+      const url = `${scriptUrl}?action=getTests${sheetId ? `&sheetId=${encodeURIComponent(sheetId)}` : ''}`;
+      const res = await fetch(url);
+      if (!res.ok) return { success: false, count: 0, error: `HTTP ${res.status}` };
+      const data = await res.json();
+      if (!Array.isArray(data) || data.length <= 1) return { success: true, count: 0 };
+
+      const rows = data.slice(1);
+      const imported: any[] = [];
+      for (const row of rows) {
+        if (!row || !row[0]) continue;
+        const id = String(row[0]).trim();
+        const title = String(row[1] || 'Đề kiểm tra Tin học').trim();
+        // Bỏ qua dòng tiêu đề
+        if (title.toLowerCase() === 'tên đề thi') continue;
+
+        const gradeStr = String(row[2] || '6');
+        const gradeLevel = parseInt(gradeStr.replace(/[^0-9]/g, ''), 10) || 6;
+        const durationMinutes = parseInt(String(row[3] || '45'), 10) || 45;
+        const totalQuestions = parseInt(String(row[4] || '20'), 10) || 20;
+        const variantCode = String(row[5] || '101').trim();
+        const authorName = String(row[6] || 'Giáo viên').trim();
+        const createdAt = String(row[7] || new Date().toISOString().split('T')[0]).trim();
+        const status = String(row[8] || 'READY').trim().toUpperCase();
+
+        imported.push({
+          id,
+          title,
+          gradeLevel,
+          durationMinutes,
+          totalQuestions,
+          variants: [{ id: `var-${id}-1`, code: variantCode, questions: [] }],
+          authorName,
+          createdAt,
+          status: status === 'ARCHIVED' ? 'ARCHIVED' : 'READY',
+          matrix: {
+            knowCount: Math.round(totalQuestions * 0.4),
+            understandCount: Math.round(totalQuestions * 0.3),
+            applyCount: Math.max(0, totalQuestions - Math.round(totalQuestions * 0.7)),
+            selectedTopics: []
+          }
+        });
+      }
+      if (imported.length > 0) {
+        LMSStorageService.importTests(imported);
+      }
+      return { success: true, count: imported.length };
+    } catch (e: any) {
+      return { success: false, count: 0, error: e.message };
+    }
+  }
+
+  /**
+   * Tải danh sách Đợt giao đề (GiaoDe) từ Google Sheet qua Apps Script
+   */
+  static async pullAssignmentsFromAppsScript(): Promise<{ success: boolean; count: number; error?: string }> {
+    const scriptUrl = getAppsScriptUrl();
+    if (!scriptUrl) return { success: false, count: 0, error: 'Chưa có Apps Script URL' };
+    const sheetId = getSavedSheetId();
+    try {
+      const url = `${scriptUrl}?action=getAssignments${sheetId ? `&sheetId=${encodeURIComponent(sheetId)}` : ''}`;
+      const res = await fetch(url);
+      if (!res.ok) return { success: false, count: 0, error: `HTTP ${res.status}` };
+      const data = await res.json();
+      if (!Array.isArray(data) || data.length <= 1) return { success: true, count: 0 };
+
+      const rows = data.slice(1);
+      const classes = LMSStorageService.getClasses();
+      const imported: any[] = [];
+      for (const row of rows) {
+        if (!row || !row[0]) continue;
+        const id = String(row[0]).trim();
+        const testTitle = String(row[1] || 'Bài kiểm tra Tin học').trim();
+        if (testTitle.toLowerCase() === 'tên bài kiểm tra') continue;
+
+        const gradeStr = String(row[2] || '6');
+        const gradeLevel = parseInt(gradeStr.replace(/[^0-9]/g, ''), 10) || 6;
+        const classNamesStr = String(row[3] || '').trim();
+        const classNames = classNamesStr ? classNamesStr.split(/[,;]/).map((s) => s.trim()).filter(Boolean) : [];
+        const classIds = classNames.map((cn) => classes.find((c) => c.name === cn)?.id || `cls-${cn.replace('/', '-')}`).filter(Boolean);
+        const startTime = String(row[4] || '').trim();
+        const endTime = String(row[5] || '').trim();
+        const password = String(row[6] || '').trim();
+        const allowReview = String(row[7] || '').trim().toLowerCase() === 'có';
+        const shuffle = String(row[8] || '').trim().toLowerCase() === 'có';
+        const assignedByName = String(row[9] || 'Giáo viên').trim();
+        const createdAt = String(row[10] || '').trim();
+        const status = String(row[11] || 'ACTIVE').trim().toUpperCase() === 'CLOSED' ? 'CLOSED' : 'ACTIVE';
+
+        imported.push({
+          id,
+          testId: `test-${id}`,
+          testTitle,
+          gradeLevel,
+          classIds,
+          classNames,
+          startTime: startTime || new Date().toISOString(),
+          endTime: endTime || new Date(Date.now() + 86400000 * 7).toISOString(),
+          password: password === 'Không có' ? '' : password,
+          allowReviewAfterSubmit: allowReview,
+          shuffleQuestions: shuffle,
+          assignedByName,
+          createdAt: createdAt || new Date().toISOString().split('T')[0],
+          status
+        });
+      }
+      if (imported.length > 0) {
+        LMSStorageService.importAssignments(imported);
+      }
+      return { success: true, count: imported.length };
+    } catch (e: any) {
+      return { success: false, count: 0, error: e.message };
+    }
+  }
+
+  /**
+   * Tải danh sách Tài khoản (TaiKhoan) từ Google Sheet qua Apps Script
+   */
+  static async pullAccountsFromAppsScript(): Promise<{ success: boolean; count: number; error?: string }> {
+    const scriptUrl = getAppsScriptUrl();
+    if (!scriptUrl) return { success: false, count: 0, error: 'Chưa có Apps Script URL' };
+    const sheetId = getSavedSheetId();
+    try {
+      const url = `${scriptUrl}?action=getAccounts${sheetId ? `&sheetId=${encodeURIComponent(sheetId)}` : ''}`;
+      const res = await fetch(url);
+      if (!res.ok) return { success: false, count: 0, error: `HTTP ${res.status}` };
+      const accData = await res.json();
+      if (!Array.isArray(accData) || accData.length <= 1) return { success: true, count: 0 };
+
+      const rows = accData.slice(1);
+      const classes = LMSStorageService.getClasses();
+      const importedUsers: User[] = [];
+
+      for (const row of rows) {
+        if (!row || !row[1]) continue;
+        const id = String(row[0] || `user-gsheet-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`);
+        const username = String(row[1]).trim();
+        if (username.toLowerCase() === 'tên đăng nhập') continue;
+
+        const password = String(row[2] || '123456').trim();
+        const fullName = String(row[3] || username).trim();
+        const email = String(row[4] || `${username}@thcs-phuho.edu.vn`).trim();
+        const rawRole = String(row[5] || 'STUDENT').trim().toUpperCase();
+        const role: UserRole = (['ADMIN', 'PRINCIPAL', 'DEPARTMENT_HEAD', 'TEACHER', 'STUDENT'].includes(rawRole)
+          ? rawRole
+          : 'STUDENT') as UserRole;
+        const code = String(row[6] || '').trim();
+        const gradeStr = String(row[7] || '').trim();
+        let classStr = String(row[8] || '').trim();
+        if (classStr.includes('T') && classStr.includes('-')) {
+          const d = new Date(classStr);
+          if (!isNaN(d.getTime())) {
+            classStr = `${d.getMonth() + 1}/${d.getDate()}`;
+          }
+        }
+        const phone = String(row[9] || '').trim();
+        const status = String(row[10] || 'ACTIVE').trim().toUpperCase() === 'LOCKED' ? 'LOCKED' : 'ACTIVE';
+        const createdAt = String(row[11] || new Date().toISOString().split('T')[0]);
+        const avatarUrl = row[12] ? String(row[12]).trim() : undefined;
+
+        let matchedClass = classes.find((c) => c.name === classStr || c.id === classStr);
+        if (!matchedClass && (classStr === '8/7' || classStr === '8.7' || classStr === '8-7')) {
+          matchedClass = classes.find((c) => c.id === 'cls-8-7');
+        }
+        if (!matchedClass && (classStr === '8/8' || classStr === '8.8' || classStr === '8-8')) {
+          matchedClass = classes.find((c) => c.id === 'cls-8-8');
+        }
+
+        importedUsers.push({
+          id,
+          username,
+          password,
+          fullName,
+          email,
+          role,
+          studentCode: role === 'STUDENT' ? code : undefined,
+          teacherCode: role !== 'STUDENT' ? code : undefined,
+          classId: matchedClass?.id,
+          gradeId:
+            matchedClass?.gradeId ||
+            (gradeStr.includes('8') || classStr.startsWith('8')
+              ? 'grade-8'
+              : gradeStr.includes('7')
+              ? 'grade-7'
+              : gradeStr.includes('9')
+              ? 'grade-9'
+              : 'grade-6'),
+          phone,
+          status,
+          schoolId: 'school-phuho-01',
+          createdAt,
+          avatarUrl: avatarUrl || undefined
+        });
+      }
+
+      if (importedUsers.length > 0) {
+        LMSStorageService.importStudents(importedUsers);
+        notifyChange('users');
+      }
+      return { success: true, count: importedUsers.length };
+    } catch (e: any) {
+      return { success: false, count: 0, error: e.message };
+    }
+  }
+
+  /**
+   * Đồng bộ toàn bộ dữ liệu 7 sheet (Tài khoản, Lớp học, Phân công, Câu hỏi, Bài học, Đề thi, Giao đề)
+   * Từ Google Sheet thông qua Apps Script
+   */
+  static async syncAllFromAppsScript(): Promise<{
+    users: number;
+    classes: number;
+    questions: number;
+    lessons: number;
+    tests: number;
+    assignments: number;
+    success: boolean;
+    error?: string;
+  }> {
+    const scriptUrl = getAppsScriptUrl();
+    if (!scriptUrl) {
+      return { users: 0, classes: 0, questions: 0, lessons: 0, tests: 0, assignments: 0, success: false, error: 'Chưa có Apps Script URL' };
+    }
+
+    notifyAutoSyncListeners({ status: 'syncing', entity: 'all' });
+    let usersCount = 0;
+    let classesCount = 0;
+    let questionsCount = 0;
+    let lessonsCount = 0;
+    let testsCount = 0;
+    let assignmentsCount = 0;
+
+    try {
+      // 1. Tải danh sách Tài khoản trước
+      const accRes = await this.pullAccountsFromAppsScript();
+      usersCount = accRes.count;
+
+      // 2. Tải danh sách Lớp học và Phân công giảng dạy
+      const clsRes = await this.pullClassesFromAppsScript();
+      classesCount = clsRes.count;
+
+      // 3. Tải Ngân hàng Câu hỏi
+      const qRes = await this.pullQuestionsFromAppsScript();
+      questionsCount = qRes.count;
+
+      // 4. Tải Tên bài học
+      const lRes = await this.pullLessonsFromAppsScript();
+      lessonsCount = lRes.count;
+
+      // 5. Tải Đề thi
+      const tRes = await this.pullTestsFromAppsScript();
+      testsCount = tRes.count;
+
+      // 6. Tải Đợt giao đề
+      const aRes = await this.pullAssignmentsFromAppsScript();
+      assignmentsCount = aRes.count;
+
+      notifyAutoSyncListeners({
+        status: 'synced',
+        lastSyncedTime: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
+        entity: 'Google Sheet (Đầy đủ 7 sheet)'
+      });
+
+      return {
+        users: usersCount,
+        classes: classesCount,
+        questions: questionsCount,
+        lessons: lessonsCount,
+        tests: testsCount,
+        assignments: assignmentsCount,
+        success: true
+      };
+    } catch (err: any) {
+      notifyAutoSyncListeners({ status: 'error', errorMessage: err.message });
+      return {
+        users: usersCount,
+        classes: classesCount,
+        questions: questionsCount,
+        lessons: lessonsCount,
+        tests: testsCount,
+        assignments: assignmentsCount,
+        success: false,
+        error: err.message
+      };
     }
   }
 
@@ -1990,204 +2351,15 @@ export class GoogleSheetsService {
     success: boolean;
     error?: string;
   }> {
-    const scriptUrl = getAppsScriptUrl();
-    if (!scriptUrl) {
-      return { users: 0, classes: 0, questions: 0, students: 0, success: false, error: 'Chưa có Apps Script URL' };
-    }
-
-    notifyAutoSyncListeners({ status: 'syncing', entity: 'all' });
-    let usersCount = 0;
-    let classesCount = 0;
-    let questionsCount = 0;
-    let studentsCount = 0;
-
-    try {
-      // 1. Tải danh sách Lớp học trước
-      try {
-        const clsRes = await fetch(`${scriptUrl}?action=getClasses`);
-        if (clsRes.ok) {
-          const clsData = await clsRes.json();
-          if (Array.isArray(clsData) && clsData.length > 1) {
-            const rows = clsData.slice(1);
-            const importedClasses: any[] = [];
-            for (const row of rows) {
-              if (!row || !row[0]) continue;
-              const id = String(row[0]);
-              let name = String(row[1] || '6/1');
-              if (name.includes('T') && name.includes('-')) {
-                const d = new Date(name);
-                if (!isNaN(d.getTime())) {
-                  name = `${d.getMonth() + 1}/${d.getDate()}`;
-                }
-              }
-              const rawGrade = String(row[2] || '6');
-              const gradeNum = parseInt(rawGrade.replace(/[^0-9]/g, ''), 10) || 6;
-              const count = parseInt(String(row[3] || '35'), 10) || 35;
-              const homeroom = String(row[4] || '');
-
-              importedClasses.push({
-                id,
-                name,
-                gradeId: `grade-${gradeNum}`,
-                academicYearId: 'ay-2025-2026',
-                studentCount: count,
-                homeroomTeacherName: homeroom
-              });
-            }
-            if (importedClasses.length > 0) {
-              LMSStorageService.importClasses(importedClasses);
-              classesCount = importedClasses.length;
-            }
-          }
-        }
-      } catch (e) {
-        console.warn('Lỗi tải classes từ Apps Script:', e);
-      }
-
-      // 2. Tải danh sách Tài khoản
-      try {
-        const accRes = await fetch(`${scriptUrl}?action=getAccounts`);
-        if (accRes.ok) {
-          const accData = await accRes.json();
-          if (Array.isArray(accData) && accData.length > 1) {
-            const rows = accData.slice(1);
-            const classes = LMSStorageService.getClasses();
-            const importedUsers: User[] = [];
-
-            for (const row of rows) {
-              if (!row || !row[1]) continue;
-              const id = String(row[0] || `user-gsheet-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`);
-              const username = String(row[1]).trim();
-              const password = String(row[2] || '123456').trim();
-              const fullName = String(row[3] || username).trim();
-              const email = String(row[4] || `${username}@thcs-phuho.edu.vn`).trim();
-              const rawRole = String(row[5] || 'STUDENT').trim().toUpperCase();
-              const role: UserRole = (['ADMIN', 'PRINCIPAL', 'DEPARTMENT_HEAD', 'TEACHER', 'STUDENT'].includes(rawRole)
-                ? rawRole
-                : 'STUDENT') as UserRole;
-              const code = String(row[6] || '').trim();
-              const gradeStr = String(row[7] || '').trim();
-              let classStr = String(row[8] || '').trim();
-              if (classStr.includes('T') && classStr.includes('-')) {
-                const d = new Date(classStr);
-                if (!isNaN(d.getTime())) {
-                  classStr = `${d.getMonth() + 1}/${d.getDate()}`;
-                }
-              }
-              const phone = String(row[9] || '').trim();
-              const status = String(row[10] || 'ACTIVE').trim().toUpperCase() === 'LOCKED' ? 'LOCKED' : 'ACTIVE';
-              const createdAt = String(row[11] || new Date().toISOString().split('T')[0]);
-              const avatarUrl = row[12] ? String(row[12]).trim() : undefined;
-
-              let matchedClass = classes.find((c) => c.name === classStr || c.id === classStr);
-              if (!matchedClass && (classStr === '8/7' || classStr === '8.7' || classStr === '8-7')) {
-                matchedClass = classes.find((c) => c.id === 'cls-8-7');
-              }
-              if (!matchedClass && (classStr === '8/8' || classStr === '8.8' || classStr === '8-8')) {
-                matchedClass = classes.find((c) => c.id === 'cls-8-8');
-              }
-
-              importedUsers.push({
-                id,
-                username,
-                password,
-                fullName,
-                email,
-                role,
-                studentCode: role === 'STUDENT' ? code : undefined,
-                teacherCode: role !== 'STUDENT' ? code : undefined,
-                classId: matchedClass?.id,
-                gradeId:
-                  matchedClass?.gradeId ||
-                  (gradeStr.includes('8') || classStr.startsWith('8')
-                    ? 'grade-8'
-                    : gradeStr.includes('7')
-                    ? 'grade-7'
-                    : gradeStr.includes('9')
-                    ? 'grade-9'
-                    : 'grade-6'),
-                phone,
-                status,
-                schoolId: 'school-phuho-01',
-                createdAt,
-                avatarUrl: avatarUrl || undefined
-              });
-            }
-
-            if (importedUsers.length > 0) {
-              LMSStorageService.importStudents(importedUsers);
-              notifyChange('users');
-              usersCount = importedUsers.length;
-            }
-          }
-        }
-      } catch (e) {
-        console.warn('Lỗi tải accounts từ Apps Script:', e);
-      }
-
-      // 3. Tải Ngân hàng Câu hỏi
-      try {
-        const sheetIdParam = getSavedSheetId();
-        const qUrl = `${scriptUrl}?action=getQuestions${sheetIdParam ? `&sheetId=${encodeURIComponent(sheetIdParam)}` : ''}`;
-        const qRes = await fetch(qUrl);
-        if (qRes.ok) {
-          const qData = await qRes.json();
-          if (Array.isArray(qData) && qData.length > 1) {
-            const rows = qData.slice(1);
-            const importedQuestions: Question[] = [];
-
-            for (let i = 0; i < rows.length; i++) {
-              const q = parseRowToQuestion(rows[i], i);
-              if (q) importedQuestions.push(q);
-            }
-
-            if (importedQuestions.length > 0) {
-              LMSStorageService.importQuestions(importedQuestions);
-              questionsCount = importedQuestions.length;
-            }
-          } else {
-            // Google Sheet chưa có câu hỏi, giữ nguyên các câu hỏi hiện có trong LMS
-            questionsCount = LMSStorageService.getQuestions().length;
-          }
-        } else {
-          questionsCount = LMSStorageService.getQuestions().length;
-        }
-      } catch (e) {
-        console.warn('Lỗi tải questions từ Apps Script:', e);
-        questionsCount = LMSStorageService.getQuestions().length;
-      }
-
-      // 4. Tải danh sách Tên bài học (TenBaiHoc)
-      try {
-        await this.pullLessonsFromAppsScript();
-      } catch (e) {
-        console.warn('Lỗi tải lessons từ Apps Script:', e);
-      }
-
-      notifyAutoSyncListeners({
-        status: 'synced',
-        lastSyncedTime: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
-        entity: 'Google Sheet (Apps Script)'
-      });
-
-      return {
-        users: usersCount,
-        classes: classesCount,
-        questions: questionsCount,
-        students: studentsCount,
-        success: true
-      };
-    } catch (err: any) {
-      notifyAutoSyncListeners({ status: 'error', errorMessage: err.message });
-      return {
-        users: usersCount,
-        classes: classesCount,
-        questions: questionsCount,
-        students: studentsCount,
-        success: false,
-        error: err.message
-      };
-    }
+    const res = await this.syncAllFromAppsScript();
+    return {
+      users: res.users,
+      classes: res.classes,
+      questions: res.questions,
+      students: res.users,
+      success: res.success,
+      error: res.error
+    };
   }
 
   /**

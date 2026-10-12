@@ -20,6 +20,7 @@ import { FirebaseConfigGuide } from './components/firebase/FirebaseConfigGuide';
 import { GoogleSheetManager } from './components/sheets/GoogleSheetManager';
 import { LoginScreen } from './components/auth/LoginScreen';
 import { GoogleSheetsService } from './services/googleSheetsService';
+import { onStorageChange } from './services/storageEvents';
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
@@ -81,9 +82,36 @@ export default function App() {
     currentUser ? getDefaultTabForRole(currentUser.role) : 'student_dashboard'
   );
 
-  // Tự động nạp sẵn toàn bộ ngân hàng câu hỏi từ Google Sheet của trường vào bộ nhớ khi mở ứng dụng
+  // Tự động nạp sẵn toàn bộ dữ liệu 7 sheet từ Google Sheet của trường vào bộ nhớ khi mở ứng dụng
   useEffect(() => {
-    GoogleSheetsService.pullQuestionsFromAppsScript().catch(() => {});
+    GoogleSheetsService.syncAllFromAppsScript().catch(() => {});
+
+    // Lắng nghe thay đổi dữ liệu để cập nhật thông tin người dùng hiện tại (lớp phân công, avatar)
+    const unsub = onStorageChange((entity) => {
+      if (entity === 'users' || entity === 'classes' || entity === 'all') {
+        const stored = LMSStorageService.getStoredUser();
+        if (!stored) return;
+        const allUsers = LMSStorageService.getUsers();
+        const matched = allUsers.find(
+          (u) =>
+            u.id === stored.id ||
+            (Boolean(u.username && stored.username) && u.username.toLowerCase() === stored.username.toLowerCase())
+        );
+        if (matched) {
+          setCurrentUser((prev) => {
+            if (!prev) return null;
+            return {
+              ...prev,
+              ...matched,
+              avatarUrl: matched.avatarUrl || prev.avatarUrl,
+              assignedClassIds: matched.assignedClassIds || prev.assignedClassIds
+            };
+          });
+        }
+      }
+    });
+
+    return unsub;
   }, []);
 
   // Khi đăng nhập thành công, lưu tài khoản và kích hoạt màn hình đúng theo vai trò của tài khoản đó
@@ -102,7 +130,7 @@ export default function App() {
     setCurrentUser(resolvedUser);
     LMSStorageService.setCurrentUser(resolvedUser);
     setActiveTab(getDefaultTabForRole(resolvedUser.role));
-    GoogleSheetsService.pullQuestionsFromAppsScript().catch(() => {});
+    GoogleSheetsService.syncAllFromAppsScript().catch(() => {});
   };
 
   // Đăng xuất hoàn toàn để đổi sang tài khoản khác

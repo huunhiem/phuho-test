@@ -97,29 +97,39 @@ export const UserAvatar: React.FC<UserAvatarProps> = ({
   const role = directRole || user?.role || 'STUDENT';
   const initial = (fullName.trim().charAt(0) || 'U').toUpperCase();
 
-  const primaryDirectUrl = GoogleDriveService.getDriveDirectImageUrl(rawUrl);
-  const fallbackThumbUrl = GoogleDriveService.getDriveThumbnailUrl(rawUrl, 300);
-  const isDataUrl = rawUrl.startsWith('data:image/');
+  const username = user?.username ? user.username.toLowerCase() : '';
+  const localBackupUrl = username ? (localStorage.getItem(`user_avatar_${username}`) || '') : '';
+  const effectiveUrl = rawUrl || localBackupUrl;
+
+  const primaryDirectUrl = GoogleDriveService.getDriveDirectImageUrl(effectiveUrl);
+  const fallbackThumbUrl = GoogleDriveService.getDriveThumbnailUrl(effectiveUrl, 300);
+  const isDataUrl = effectiveUrl.startsWith('data:image/');
 
   const [currentSrc, setCurrentSrc] = useState<string>(primaryDirectUrl);
-  const [attemptLevel, setAttemptLevel] = useState<number>(0); // 0 = primary, 1 = fallback thumb, 2 = failed
+  const [attemptLevel, setAttemptLevel] = useState<number>(0); // 0 = primary, 1 = fallback thumb, 2 = local backup, 3 = failed
   const [isLoaded, setIsLoaded] = useState<boolean>(() => isDataUrl);
 
   useEffect(() => {
-    const newDirect = GoogleDriveService.getDriveDirectImageUrl(rawUrl);
+    const latestLocal = username ? (localStorage.getItem(`user_avatar_${username}`) || '') : '';
+    const activeUrl = rawUrl || latestLocal;
+    const newDirect = GoogleDriveService.getDriveDirectImageUrl(activeUrl);
     setCurrentSrc(newDirect);
     setAttemptLevel(0);
-    setIsLoaded(rawUrl.startsWith('data:image/'));
-  }, [rawUrl]);
+    setIsLoaded(activeUrl.startsWith('data:image/'));
+  }, [rawUrl, username]);
 
   const handleImageError = () => {
     if (attemptLevel === 0 && fallbackThumbUrl && fallbackThumbUrl !== currentSrc) {
       // Thử endpoint thumbnail Google Drive
       setAttemptLevel(1);
       setCurrentSrc(fallbackThumbUrl);
-    } else {
-      // Cả 2 đều lỗi -> chuyển sang hiện chữ cái đại diện
+    } else if (attemptLevel <= 1 && localBackupUrl && currentSrc !== localBackupUrl) {
+      // Thử bản lưu ảnh cục bộ
       setAttemptLevel(2);
+      setCurrentSrc(localBackupUrl);
+    } else {
+      // Đã thử hết các nguồn -> chuyển sang hiện chữ cái đại diện
+      setAttemptLevel(3);
     }
   };
 
@@ -129,7 +139,7 @@ export const UserAvatar: React.FC<UserAvatarProps> = ({
 
   const sizeCfg = SIZE_CONFIGS[size] || SIZE_CONFIGS.md;
   const roleCfg = ROLE_GRADIENTS[role] || ROLE_GRADIENTS.STUDENT;
-  const isImageValid = Boolean(rawUrl && attemptLevel < 2);
+  const isImageValid = Boolean((effectiveUrl || currentSrc) && attemptLevel < 3);
 
   return (
     <div
