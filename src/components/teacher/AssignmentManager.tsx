@@ -48,8 +48,13 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
   const assignableClasses = classes.length > 0 ? classes : allClasses;
 
   const allTests = LMSStorageService.getTests();
-  // Cho phép giáo viên lựa chọn tất cả các đề thi trong trường (bao gồm cả đề tải từ sheet DeThi) để giao bài
-  const assignableTests = allTests;
+  // Riêng Tài khoản quản trị hiển thị tất cả đề; Giáo viên chỉ thấy và giao đề do chính tài khoản mình tạo
+  const assignableTests = useMemo(() => {
+    if (isPrivileged) return allTests;
+    return allTests.filter(
+      (t) => t.createdBy === currentUser.id || LMSStorageService.isTeacherNameMatch(t.authorName, currentUser)
+    );
+  }, [allTests, isPrivileged, currentUser]);
 
   const [assignments, setAssignments] = useState<Assignment[]>(() => LMSStorageService.getAssignments());
   const [assignScopeFilter, setAssignScopeFilter] = useState<'ALL' | 'MINE'>('ALL');
@@ -58,26 +63,22 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
   const [syncAssignMessage, setSyncAssignMessage] = useState<string | null>(null);
   const [validationError, setValidationError] = useState<string>('');
 
-  // Giáo viên có thể xem Tất cả đợt giao hoặc Đợt giao của tôi
+  // Hiển thị đợt giao bài: Riêng tài khoản quản trị hiển thị tất cả; Tài khoản nào giao đề thì chỉ hiển thị ở tài khoản đó
   const visibleAssignments = useMemo(() => {
-    if (isPrivileged || assignScopeFilter === 'ALL') {
+    if (isPrivileged) {
+      if (assignScopeFilter === 'MINE') {
+        return assignments.filter(
+          (a) => a.assignedBy === currentUser.id || LMSStorageService.isTeacherNameMatch(a.assignedByName, currentUser)
+        );
+      }
       return assignments;
     }
+    // Giáo viên thông thường: Đợt giao của tài khoản nào thì CHỈ hiển thị ở tài khoản đó
     return assignments.filter((a) => {
       if (a.assignedBy === currentUser.id) return true;
-      const abName = (a.assignedByName || '').toLowerCase().trim();
-      const uFull = (currentUser.fullName || '').toLowerCase().trim();
-      const uUser = (currentUser.username || '').toLowerCase().trim();
-      if (abName && (abName === uFull || abName === uUser || abName.includes(uFull) || uFull.includes(abName))) {
-        return true;
-      }
-      const myClassNames = new Set(classes.map((c) => c.name));
-      const myClassIds = new Set(classes.map((c) => c.id));
-      if (a.classNames?.some((cn) => myClassNames.has(cn))) return true;
-      if (a.classIds?.some((cid) => myClassIds.has(cid))) return true;
-      return false;
+      return LMSStorageService.isTeacherNameMatch(a.assignedByName, currentUser);
     });
-  }, [assignments, isPrivileged, assignScopeFilter, currentUser, classes]);
+  }, [assignments, isPrivileged, assignScopeFilter, currentUser]);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingAssign, setEditingAssign] = useState<Assignment | null>(null);
@@ -151,16 +152,22 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
         setToastMessage(`✓ ${res.message}`);
         setSyncAssignMessage(`✓ ${res.message} lúc ${new Date().toLocaleTimeString('vi-VN')}`);
       } else {
-        setSyncAssignMessage(`Thông báo: ${res.message}`);
+        setToastMessage(`⚠️ ${res.message}`);
+        setSyncAssignMessage(`⚠️ ${res.message}`);
       }
     } catch (err: any) {
-      setSyncAssignMessage(`Lỗi đồng bộ: ${err.message || String(err)}`);
+      setSyncAssignMessage(`⚠️ Lỗi đồng bộ: ${err.message || String(err)}`);
     } finally {
       setIsSyncingAssignments(false);
     }
   };
 
   const handleOpenAdd = () => {
+    if (!isPrivileged && assignableTests.length === 0) {
+      setToastMessage('⚠️ Thầy/Cô chưa có đề kiểm tra nào do mình tạo. Vui lòng vào mục "Tạo đề kiểm tra" để tạo đề trước khi giao bài!');
+      setTimeout(() => setToastMessage(null), 5000);
+      return;
+    }
     setEditingAssign(null);
     setValidationError('');
     setFormData({
@@ -351,12 +358,28 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
 
       {/* Sync Status Banner */}
       {syncAssignMessage && (
-        <div className="flex items-center justify-between p-3 bg-indigo-50 border border-indigo-200 rounded-xl text-xs text-indigo-900 shadow-xs">
+        <div
+          className={`flex items-center justify-between p-3 rounded-xl text-xs shadow-xs ${
+            syncAssignMessage.startsWith('⚠️') || syncAssignMessage.startsWith('Lỗi')
+              ? 'bg-amber-50 border border-amber-200 text-amber-900'
+              : 'bg-indigo-50 border border-indigo-200 text-indigo-900'
+          }`}
+        >
           <div className="flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-indigo-600 shrink-0" />
+            {syncAssignMessage.startsWith('⚠️') || syncAssignMessage.startsWith('Lỗi') ? (
+              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+            ) : (
+              <CheckCircle2 className="w-4 h-4 text-indigo-600 shrink-0" />
+            )}
             <span>{syncAssignMessage}</span>
           </div>
-          <span className="font-semibold text-[11px] bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded">
+          <span
+            className={`font-semibold text-[11px] px-2 py-0.5 rounded ${
+              syncAssignMessage.startsWith('⚠️') || syncAssignMessage.startsWith('Lỗi')
+                ? 'bg-amber-100 text-amber-800'
+                : 'bg-indigo-100 text-indigo-800'
+            }`}
+          >
             Sheet: GiaoDe
           </span>
         </div>
@@ -364,30 +387,39 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
 
       {/* Scope Filter Tabs */}
       <div className="flex items-center justify-between gap-3 border-b border-slate-200 pb-3">
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setAssignScopeFilter('ALL')}
-            className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
-              assignScopeFilter === 'ALL'
-                ? 'bg-indigo-600 text-white shadow-xs'
-                : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
-            }`}
-          >
-            Tất cả đợt giao ({assignments.length})
-          </button>
-          <button
-            type="button"
-            onClick={() => setAssignScopeFilter('MINE')}
-            className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
-              assignScopeFilter === 'MINE'
-                ? 'bg-indigo-600 text-white shadow-xs'
-                : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
-            }`}
-          >
-            Đợt giao của tôi ({assignments.filter((a) => a.assignedBy === currentUser.id || a.assignedByName === currentUser.fullName).length})
-          </button>
-        </div>
+        {isPrivileged ? (
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setAssignScopeFilter('ALL')}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+                assignScopeFilter === 'ALL'
+                  ? 'bg-indigo-600 text-white shadow-xs'
+                  : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+              }`}
+            >
+              Tất cả đợt giao ({assignments.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setAssignScopeFilter('MINE')}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+                assignScopeFilter === 'MINE'
+                  ? 'bg-indigo-600 text-white shadow-xs'
+                  : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+              }`}
+            >
+              Đợt giao do tôi tạo ({assignments.filter((a) => a.assignedBy === currentUser.id || LMSStorageService.isTeacherNameMatch(a.assignedByName, currentUser)).length})
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2">
+            <span className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-200">
+              Đợt giao bài do tôi tạo ({visibleAssignments.length})
+            </span>
+            <span className="text-xs text-slate-400">· Chỉ hiển thị bài do tài khoản của Thầy/Cô giao</span>
+          </div>
+        )}
         <span className="text-xs text-slate-400">
           Hiển thị <strong>{visibleAssignments.length}</strong> đợt giao bài
         </span>

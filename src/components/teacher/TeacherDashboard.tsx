@@ -52,27 +52,14 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ currentUser,
     ? tests
     : tests.filter((t) => {
         if (t.createdBy === currentUser.id) return true;
-        const authName = (t.authorName || '').toLowerCase().trim();
-        if (authName && (authName === uFull || authName === uUser || authName.includes(uFull) || uFull.includes(authName))) {
-          return true;
-        }
-        return false;
+        return LMSStorageService.isTeacherNameMatch(t.authorName, currentUser);
       });
-
-  const myClassNames = new Set(visibleClasses.map((c) => c.name));
-  const myClassIds = new Set(visibleClasses.map((c) => c.id));
 
   const visibleAssignments = isPrivileged
     ? assignments
     : assignments.filter((a) => {
         if (a.assignedBy === currentUser.id) return true;
-        const abName = (a.assignedByName || '').toLowerCase().trim();
-        if (abName && (abName === uFull || abName === uUser || abName.includes(uFull) || uFull.includes(abName))) {
-          return true;
-        }
-        if (a.classNames?.some((cn) => myClassNames.has(cn))) return true;
-        if (a.classIds?.some((cid) => myClassIds.has(cid))) return true;
-        return false;
+        return LMSStorageService.isTeacherNameMatch(a.assignedByName, currentUser);
       });
 
   const visibleAssignmentIds = new Set(visibleAssignments.map((a) => a.id));

@@ -331,18 +331,20 @@ export const TestBuilder: React.FC<TestBuilderProps> = ({ currentUser, onTestCre
   const [isSyncingTests, setIsSyncingTests] = useState(false);
   const [syncTestMessage, setSyncTestMessage] = useState<string | null>(null);
 
-  // Hiển thị đề thi: Admin/Hiệu trưởng xem tất cả; Giáo viên có thể xem Tất cả đề trong trường hoặc Đề của tôi
+  // Hiển thị đề thi: Riêng tài khoản quản trị hiển thị tất cả; Đề tài khoản nào tạo thì chỉ xuất hiện ở tài khoản đó
   const visibleTests = useMemo(() => {
-    if (isPrivileged || testScopeFilter === 'ALL') {
+    if (isPrivileged) {
+      if (testScopeFilter === 'MINE') {
+        return tests.filter(
+          (t) => t.createdBy === currentUser.id || LMSStorageService.isTeacherNameMatch(t.authorName, currentUser)
+        );
+      }
       return tests;
     }
-    return tests.filter((t) => {
-      if (t.createdBy === currentUser.id) return true;
-      const auth = (t.authorName || '').toLowerCase().trim();
-      const me = (currentUser.fullName || '').toLowerCase().trim();
-      const myUser = (currentUser.username || '').toLowerCase().trim();
-      return auth && (auth === me || auth === myUser || auth.includes(me) || me.includes(auth));
-    });
+    // Tài khoản giáo viên: Đề tài khoản nào Tạo thì chỉ xuất hiện ở Tài khoản đó
+    return tests.filter(
+      (t) => t.createdBy === currentUser.id || LMSStorageService.isTeacherNameMatch(t.authorName, currentUser)
+    );
   }, [tests, isPrivileged, testScopeFilter, currentUser]);
 
   useEffect(() => {
@@ -408,10 +410,11 @@ export const TestBuilder: React.FC<TestBuilderProps> = ({ currentUser, onTestCre
         setToastMessage(`✓ ${res.message}`);
         setSyncTestMessage(`✓ ${res.message} lúc ${new Date().toLocaleTimeString('vi-VN')}`);
       } else {
-        setSyncTestMessage(`Thông báo: ${res.message}`);
+        setToastMessage(`⚠️ ${res.message}`);
+        setSyncTestMessage(`⚠️ ${res.message}`);
       }
     } catch (err: any) {
-      setSyncTestMessage(`Lỗi đồng bộ: ${err.message || String(err)}`);
+      setSyncTestMessage(`⚠️ Lỗi đồng bộ: ${err.message || String(err)}`);
     } finally {
       setIsSyncingTests(false);
     }
@@ -1099,12 +1102,28 @@ export const TestBuilder: React.FC<TestBuilderProps> = ({ currentUser, onTestCre
 
       {/* Sync Status Banner */}
       {syncTestMessage && !isCreating && (
-        <div className="flex items-center justify-between p-3 bg-indigo-50 border border-indigo-200 rounded-xl text-xs text-indigo-900 shadow-xs">
+        <div
+          className={`flex items-center justify-between p-3 rounded-xl text-xs shadow-xs ${
+            syncTestMessage.startsWith('⚠️') || syncTestMessage.startsWith('Lỗi')
+              ? 'bg-amber-50 border border-amber-200 text-amber-900'
+              : 'bg-indigo-50 border border-indigo-200 text-indigo-900'
+          }`}
+        >
           <div className="flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-indigo-600 shrink-0" />
+            {syncTestMessage.startsWith('⚠️') || syncTestMessage.startsWith('Lỗi') ? (
+              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+            ) : (
+              <CheckCircle2 className="w-4 h-4 text-indigo-600 shrink-0" />
+            )}
             <span>{syncTestMessage}</span>
           </div>
-          <span className="font-semibold text-[11px] bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded">
+          <span
+            className={`font-semibold text-[11px] px-2 py-0.5 rounded ${
+              syncTestMessage.startsWith('⚠️') || syncTestMessage.startsWith('Lỗi')
+                ? 'bg-amber-100 text-amber-800'
+                : 'bg-indigo-100 text-indigo-800'
+            }`}
+          >
             Sheet: DeThi
           </span>
         </div>
@@ -1113,30 +1132,39 @@ export const TestBuilder: React.FC<TestBuilderProps> = ({ currentUser, onTestCre
       {/* Scope Filter Tabs */}
       {!isCreating && (
         <div className="flex items-center justify-between gap-3 border-b border-slate-200 pb-3">
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setTestScopeFilter('ALL')}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
-                testScopeFilter === 'ALL'
-                  ? 'bg-indigo-600 text-white shadow-xs'
-                  : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
-              }`}
-            >
-              Tất cả đề thi ({tests.length})
-            </button>
-            <button
-              type="button"
-              onClick={() => setTestScopeFilter('MINE')}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
-                testScopeFilter === 'MINE'
-                  ? 'bg-indigo-600 text-white shadow-xs'
-                  : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
-              }`}
-            >
-              Đề thi của tôi ({tests.filter((t) => t.createdBy === currentUser.id || t.authorName === currentUser.fullName).length})
-            </button>
-          </div>
+          {isPrivileged ? (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setTestScopeFilter('ALL')}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+                  testScopeFilter === 'ALL'
+                    ? 'bg-indigo-600 text-white shadow-xs'
+                    : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+                }`}
+              >
+                Tất cả đề thi trong trường ({tests.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setTestScopeFilter('MINE')}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+                  testScopeFilter === 'MINE'
+                    ? 'bg-indigo-600 text-white shadow-xs'
+                    : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+                }`}
+              >
+                Đề thi do tôi tạo ({tests.filter((t) => t.createdBy === currentUser.id || LMSStorageService.isTeacherNameMatch(t.authorName, currentUser)).length})
+              </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <span className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-200">
+                Đề thi do tôi tạo ({visibleTests.length})
+              </span>
+              <span className="text-xs text-slate-400">· Chỉ hiển thị đề do tài khoản của Thầy/Cô tạo</span>
+            </div>
+          )}
           <span className="text-xs text-slate-400">
             Hiển thị <strong>{visibleTests.length}</strong> đề thi
           </span>

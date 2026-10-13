@@ -76,13 +76,7 @@ export const ResultsAndGrading: React.FC<ResultsAndGradingProps> = ({ currentUse
     ? assignments
     : assignments.filter((a) => {
         if (a.assignedBy === currentUser.id) return true;
-        const abName = (a.assignedByName || '').toLowerCase().trim();
-        if (abName && (abName === uFull || abName === uUser || abName.includes(uFull) || uFull.includes(abName))) {
-          return true;
-        }
-        if (a.classNames?.some((cn) => myClassNames.has(cn))) return true;
-        if (a.classIds?.some((cid) => myClassIds.has(cid))) return true;
-        return false;
+        return LMSStorageService.isTeacherNameMatch(a.assignedByName, currentUser);
       });
 
   // Compute detailed participation report using LMSStorageService

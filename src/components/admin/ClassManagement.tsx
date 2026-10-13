@@ -12,6 +12,7 @@ import {
   DownloadCloud,
   CheckCircle2,
   AlertCircle,
+  AlertTriangle,
   Loader2,
   BookOpen,
   CheckSquare,
@@ -412,13 +413,14 @@ export const ClassManagement: React.FC = () => {
         const res = await GoogleSheetsService.pushAllDataViaAppsScript();
         if (res.success) {
           setSyncMessage('✓ Đã đẩy thành công toàn bộ Lớp học và Phân công lên Google Sheet qua Apps Script!');
+          showToast('✓ Đồng bộ dữ liệu Lớp học & Phân công lên Google Sheet thành công!');
         } else {
-          setSyncMessage(`Thông báo: ${res.message}`);
+          setSyncMessage(`⚠️ ${res.message}`);
+          showToast(`⚠️ ${res.message}`);
         }
       }
-      showToast('✓ Đồng bộ dữ liệu Lớp học & Phân công lên Google Sheet thành công!');
     } catch (err: any) {
-      setSyncMessage(`Lỗi đồng bộ: ${err.message || String(err)}`);
+      setSyncMessage(`⚠️ Lỗi đồng bộ: ${err.message || String(err)}`);
     } finally {
       setIsSyncing(false);
     }
@@ -561,12 +563,28 @@ export const ClassManagement: React.FC = () => {
 
       {/* Sync Status Banner */}
       {(syncMessage || autoSyncState.status === 'synced') && (
-        <div className="flex items-center justify-between p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800">
+        <div
+          className={`flex items-center justify-between p-3 rounded-xl text-xs ${
+            syncMessage?.startsWith('⚠️') || syncMessage?.startsWith('Lỗi')
+              ? 'bg-amber-50 border border-amber-200 text-amber-900'
+              : 'bg-emerald-50 border border-emerald-200 text-emerald-800'
+          }`}
+        >
           <div className="flex items-center gap-2">
-            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            {syncMessage?.startsWith('⚠️') || syncMessage?.startsWith('Lỗi') ? (
+              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+            ) : (
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            )}
             <span>{syncMessage || `Đã đồng bộ dữ liệu lớp học lên Google Sheet lúc ${autoSyncState.lastSyncedTime}`}</span>
           </div>
-          <span className="font-semibold text-[11px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded">
+          <span
+            className={`font-semibold text-[11px] px-2 py-0.5 rounded ${
+              syncMessage?.startsWith('⚠️') || syncMessage?.startsWith('Lỗi')
+                ? 'bg-amber-100 text-amber-800'
+                : 'bg-emerald-100 text-emerald-800'
+            }`}
+          >
             Sheet: LopHoc & GiaoVien
           </span>
         </div>

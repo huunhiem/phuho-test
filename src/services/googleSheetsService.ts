@@ -2387,6 +2387,32 @@ export class GoogleSheetsService {
       if (res.success) {
         return { success: true, message: 'Đã lưu danh sách Đề thi lên sheet DeThi (qua Apps Script) thành công!' };
       }
+
+      // Tự động chuyển sang fallback gọi action 'saveTest' cho từng đề thi nếu script chưa có batchPushAllData
+      if (res.unsupportedAction || (res.error && res.error.includes('Unsupported action'))) {
+        try {
+          const tests = LMSStorageService.getTests();
+          for (const t of tests) {
+            await this.postToAppsScript({
+              action: 'saveTest',
+              sheetId,
+              id: t.id,
+              title: t.title,
+              gradeLevel: t.gradeLevel,
+              durationMinutes: t.durationMinutes,
+              totalQuestions: t.totalQuestions,
+              variantCode: t.variants?.[0]?.code || '101',
+              authorName: t.authorName || 'Giáo viên',
+              createdAt: t.createdAt,
+              status: t.status || 'READY'
+            });
+          }
+          return { success: true, message: `Đã lưu danh sách ${tests.length} Đề thi lên Google Sheet thành công!` };
+        } catch (fbErr: any) {
+          return { success: false, message: fbErr.message || 'Lỗi lưu đề thi' };
+        }
+      }
+
       return { success: false, message: res.error || 'Lỗi gửi lên Apps Script' };
     }
     return { success: false, message: 'Chưa kết nối Google Sheet hoặc cấu hình Apps Script' };
@@ -2417,6 +2443,35 @@ export class GoogleSheetsService {
       if (res.success) {
         return { success: true, message: 'Đã lưu danh sách Giao bài lên sheet GiaoDe (qua Apps Script) thành công!' };
       }
+
+      // Tự động chuyển sang fallback gọi action 'saveAssignment' cho từng đợt giao bài nếu script chưa có batchPushAllData
+      if (res.unsupportedAction || (res.error && res.error.includes('Unsupported action'))) {
+        try {
+          const assignments = LMSStorageService.getAssignments();
+          for (const a of assignments) {
+            await this.postToAppsScript({
+              action: 'saveAssignment',
+              sheetId,
+              id: a.id,
+              testTitle: a.testTitle,
+              gradeLevel: a.gradeLevel,
+              classNames: a.classNames,
+              startTime: a.startTime,
+              endTime: a.endTime,
+              password: a.password || 'Không có',
+              allowReviewAfterSubmit: a.allowReviewAfterSubmit,
+              shuffleQuestions: a.shuffleQuestions,
+              assignedByName: a.assignedByName || 'Giáo viên',
+              createdAt: a.createdAt,
+              status: a.status || 'ACTIVE'
+            });
+          }
+          return { success: true, message: `Đã lưu danh sách ${assignments.length} đợt Giao bài lên Google Sheet thành công!` };
+        } catch (fbErr: any) {
+          return { success: false, message: fbErr.message || 'Lỗi lưu đợt giao đề' };
+        }
+      }
+
       return { success: false, message: res.error || 'Lỗi gửi lên Apps Script' };
     }
     return { success: false, message: 'Chưa kết nối Google Sheet hoặc cấu hình Apps Script' };
@@ -3102,6 +3157,87 @@ export class GoogleSheetsService {
           message: 'Đã đẩy thành công toàn bộ các sheet (TaiKhoan, HocSinh, GiaoVien, LopHoc, TenBaiHoc, CauHoi, DeThi, GiaoDe, BangDiem) lên Google Sheet và sao lưu Google Drive!'
         };
       }
+      if (res.unsupportedAction || (res.error && res.error.includes('Unsupported action'))) {
+        try {
+          // 1. Đồng bộ phân công và lớp học qua saveTeacherAssignment
+          const teacherRows = this.buildGiaoVienRows();
+          const classRows = this.buildLopHocRows();
+          await this.postToAppsScript({
+            action: 'saveTeacherAssignment',
+            sheetId,
+            classesRows: classRows,
+            teachersRows: teacherRows
+          });
+
+          // 2. Lưu từng lớp học qua action 'saveClass'
+          const classes = LMSStorageService.getClasses();
+          for (const c of classes) {
+            await this.postToAppsScript({
+              action: 'saveClass',
+              sheetId,
+              id: c.id,
+              name: c.name,
+              grade: c.name.split('/')[0] || '6',
+              studentCount: c.studentCount || 35,
+              homeroomTeacherName: c.homeroomTeacherName,
+              assignedTeacherNames: c.subjectTeacherName
+            });
+          }
+
+          // 3. Lưu từng đề thi qua action 'saveTest'
+          const tests = LMSStorageService.getTests();
+          for (const t of tests) {
+            await this.postToAppsScript({
+              action: 'saveTest',
+              sheetId,
+              id: t.id,
+              title: t.title,
+              gradeLevel: t.gradeLevel,
+              durationMinutes: t.durationMinutes,
+              totalQuestions: t.totalQuestions,
+              variantCode: t.variants?.[0]?.code || '101',
+              authorName: t.authorName || 'Giáo viên',
+              createdAt: t.createdAt,
+              status: t.status || 'READY'
+            });
+          }
+
+          // 4. Lưu từng đợt giao đề qua action 'saveAssignment'
+          const assigns = LMSStorageService.getAssignments();
+          for (const a of assigns) {
+            await this.postToAppsScript({
+              action: 'saveAssignment',
+              sheetId,
+              id: a.id,
+              testTitle: a.testTitle,
+              gradeLevel: a.gradeLevel,
+              classNames: a.classNames,
+              startTime: a.startTime,
+              endTime: a.endTime,
+              password: a.password || 'Không có',
+              allowReviewAfterSubmit: a.allowReviewAfterSubmit,
+              shuffleQuestions: a.shuffleQuestions,
+              assignedByName: a.assignedByName || 'Giáo viên',
+              createdAt: a.createdAt,
+              status: a.status || 'ACTIVE'
+            });
+          }
+
+          notifyAutoSyncListeners({
+            status: 'synced',
+            lastSyncedTime: new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }),
+            entity: 'Lớp học, Phân công, Đề thi & Giao đề'
+          });
+
+          return {
+            success: true,
+            message: 'Đã đồng bộ toàn bộ Lớp học, Phân công giảng dạy, Đề thi và Giao bài lên Google Sheet thành công!'
+          };
+        } catch (fbErr: any) {
+          return { success: false, message: fbErr.message || 'Lỗi đồng bộ dữ liệu dự phòng' };
+        }
+      }
+
       return { success: false, message: res.error || 'Không nhận được phản hồi từ Apps Script' };
     } catch (e: any) {
       return { success: false, message: e.message || 'Lỗi khi gửi dữ liệu lên Apps Script' };
