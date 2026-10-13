@@ -1646,8 +1646,8 @@ export class GoogleSheetsService {
       if (raw instanceof Date) {
         const m = raw.getMonth() + 1;
         const d = raw.getDate();
-        if (m >= 6 && m <= 9 && d >= 1 && d <= 15) return `${m}/${d}`;
-        if (d >= 6 && d <= 9 && m >= 1 && m <= 15) return `${d}/${m}`;
+        if (m >= 1 && m <= 12 && d >= 1 && d <= 15) return `${m}/${d}`;
+        if (d >= 1 && d <= 12 && m >= 1 && m <= 15) return `${d}/${m}`;
         return `${m}/${d}`;
       }
       let s = String(raw).trim();
@@ -1656,19 +1656,19 @@ export class GoogleSheetsService {
         if (!isNaN(d.getTime())) {
           const m = d.getMonth() + 1;
           const dt = d.getDate();
-          if (m >= 6 && m <= 9 && dt >= 1 && dt <= 15) return `${m}/${dt}`;
-          if (dt >= 6 && dt <= 9 && m >= 1 && m <= 15) return `${dt}/${m}`;
+          if (m >= 1 && m <= 12 && dt >= 1 && dt <= 15) return `${m}/${dt}`;
+          if (dt >= 1 && dt <= 12 && m >= 1 && m <= 15) return `${dt}/${m}`;
         }
       }
       const dateParts = s.match(/^(\d{1,2})\/(\d{1,2})(?:\/\d{2,4})?$/);
       if (dateParts) {
         const p1 = parseInt(dateParts[1], 10);
         const p2 = parseInt(dateParts[2], 10);
-        if (p1 >= 6 && p1 <= 9 && p2 >= 1 && p2 <= 15) return `${p1}/${p2}`;
-        if (p2 >= 6 && p2 <= 9 && p1 >= 1 && p1 <= 15) return `${p2}/${p1}`;
+        if (p1 >= 1 && p1 <= 12 && p2 >= 1 && p2 <= 15) return `${p1}/${p2}`;
+        if (p2 >= 1 && p2 <= 12 && p1 >= 1 && p1 <= 15) return `${p2}/${p1}`;
       }
       s = s.replace(/^(lớp|lop|khối|khoi)\s+/i, '').trim();
-      s = s.replace(/^([6-9])[\.\-]([0-9]{1,2})$/, '$1/$2');
+      s = s.replace(/^([0-9]{1,2})[\.\-]([0-9]{1,2})$/, '$1/$2');
       return s;
     };
 
@@ -1779,7 +1779,7 @@ export class GoogleSheetsService {
         for (let c = 0; c < row.length; c++) {
           const val = String(row[c] || '').trim();
           if (!val) continue;
-          if (/^(lớp\s*)?([6-9])[\/\.\-A-Za-z0-9]+/i.test(val)) {
+          if (/^(lớp\s*)?([0-9]{1,2})[\/\.\-A-Za-z0-9]+/i.test(val)) {
             rawName = val;
             break;
           }
@@ -1790,12 +1790,11 @@ export class GoogleSheetsService {
       }
 
       const cleanName = normalizeClassName(rawName);
-      if (!cleanName || cleanName.toLowerCase() === 'tên lớp' || cleanName.toLowerCase() === 'lớp') {
+      if (!cleanName || cleanName.toLowerCase() === 'tên lớp' || cleanName.toLowerCase() === 'lớp' || cleanName.toLowerCase() === 'stt' || cleanName.toLowerCase() === 'khối' || cleanName.toLowerCase() === 'mã lớp') {
         continue;
       }
 
-      // Chỉ chấp nhận định dạng lớp cấp THCS hợp lệ (Khối 6-9, ví dụ 6/1, 6A, 7/2, 8/7, 9/1)
-      if (!/^[6-9][\/\.\-_A-Za-z0-9]+$/i.test(cleanName)) {
+      if (cleanName.toLowerCase().startsWith('tổng') || cleanName.toLowerCase().startsWith('cộng') || cleanName.toLowerCase().includes('học sinh')) {
         continue;
       }
 
@@ -1809,7 +1808,7 @@ export class GoogleSheetsService {
       if (rawGrade) {
         gradeNum = parseInt(String(rawGrade).replace(/[^0-9]/g, ''), 10) || 6;
       } else {
-        const matchG = cleanName.match(/^([6-9])/);
+        const matchG = cleanName.match(/^([0-9]{1,2})/);
         gradeNum = matchG ? parseInt(matchG[1], 10) : 6;
       }
 
@@ -1935,7 +1934,7 @@ export class GoogleSheetsService {
   ): Promise<number> {
     const { rows } = await this.readSheetWithFallback(
       spreadsheetId,
-      ['LopHoc', 'Lớp học', 'Lớp Học', 'LOPHOC', 'lophoc', 'Danh sách lớp'],
+      ['LopHoc', 'Lớp học', 'Lớp Học', 'LOPHOC', 'lophoc', 'Danh sách lớp', 'Lớp', 'Lop', 'LOP', 'Danh sách lớp học', 'DS Lop', 'DS Lớp'],
       'A1:Z',
       accessToken
     );
@@ -2013,74 +2012,147 @@ export class GoogleSheetsService {
   /**
    * Tải danh sách Đề thi (sheet DeThi / Đề thi) từ Google Sheet về LMS (OAuth Direct)
    */
+  /**
+   * Phân tích và trích xuất danh sách Đề thi từ dữ liệu các hàng của sheet DeThi
+   */
+  static parseDeThiRows(rows: any[][]): Test[] {
+    if (!rows || rows.length === 0) return [];
+
+    let headerRowIdx = -1;
+    let colId = -1;
+    let colTitle = -1;
+    let colGrade = -1;
+    let colDuration = -1;
+    let colCount = -1;
+    let colVariant = -1;
+    let colAuthor = -1;
+    let colCreatedAt = -1;
+    let colStatus = -1;
+
+    for (let rIdx = 0; rIdx < Math.min(6, rows.length); rIdx++) {
+      const r = rows[rIdx];
+      if (!Array.isArray(r)) continue;
+      const joined = r.map((c) => String(c || '').toLowerCase()).join(' ');
+      if (
+        joined.includes('đề') ||
+        joined.includes('tên đề') ||
+        joined.includes('thời gian') ||
+        joined.includes('mã đề') ||
+        joined.includes('số câu')
+      ) {
+        headerRowIdx = rIdx;
+        r.forEach((cell, cIdx) => {
+          const h = String(cell || '').trim().toLowerCase();
+          if (/^(id|stt|mã|mã\s*đề\s*thi)$/i.test(h)) colId = cIdx;
+          else if (/^(tên\s*đề\s*thi|tên\s*đề|tên\s*bài|đề\s*thi|tiêu\s*đề)$/i.test(h) || h.includes('tên đề')) colTitle = cIdx;
+          else if (/^(khối|khối\s*lớp|grade)$/i.test(h)) colGrade = cIdx;
+          else if (/^(thời\s*gian|phút|thời\s*lượng)$/i.test(h) || h.includes('thời gian')) colDuration = cIdx;
+          else if (/^(số\s*câu|tổng\s*số\s*câu|số\s*lượng\s*câu)$/i.test(h) || h.includes('số câu')) colCount = cIdx;
+          else if (/^(mã\s*đề|variant)$/i.test(h)) colVariant = cIdx;
+          else if (/^(tác\s*giả|người\s*tạo|giáo\s*viên)$/i.test(h)) colAuthor = cIdx;
+          else if (/^(ngày\s*tạo|ngày)$/i.test(h)) colCreatedAt = cIdx;
+          else if (/^(trạng\s*thái|status)$/i.test(h)) colStatus = cIdx;
+        });
+        break;
+      }
+    }
+
+    const dataRows = headerRowIdx >= 0 ? rows.slice(headerRowIdx + 1) : rows;
+    const allQuestions = LMSStorageService.getQuestions();
+    const currentUser = LMSStorageService.getCurrentUser();
+    const existingTests = LMSStorageService.getTests();
+    const existingMap = new Map(existingTests.map((t) => [t.id, t]));
+    const titleMap = new Map(existingTests.map((t) => [t.title.trim().toLowerCase(), t]));
+
+    const imported: Test[] = [];
+
+    for (let i = 0; i < dataRows.length; i++) {
+      const row = dataRows[i];
+      if (!row || row.length === 0) continue;
+
+      let rawId = colId >= 0 && row[colId] !== undefined ? String(row[colId]).trim() : '';
+      let rawTitle = colTitle >= 0 && row[colTitle] !== undefined ? String(row[colTitle]).trim() : '';
+      let rawGrade = colGrade >= 0 && row[colGrade] !== undefined ? String(row[colGrade]).trim() : '';
+      let rawDuration = colDuration >= 0 && row[colDuration] !== undefined ? String(row[colDuration]).trim() : '';
+      let rawCount = colCount >= 0 && row[colCount] !== undefined ? String(row[colCount]).trim() : '';
+      let rawVariant = colVariant >= 0 && row[colVariant] !== undefined ? String(row[colVariant]).trim() : '';
+      let rawAuthor = colAuthor >= 0 && row[colAuthor] !== undefined ? String(row[colAuthor]).trim() : '';
+      let rawCreatedAt = colCreatedAt >= 0 && row[colCreatedAt] !== undefined ? String(row[colCreatedAt]).trim() : '';
+      let rawStatus = colStatus >= 0 && row[colStatus] !== undefined ? String(row[colStatus]).trim() : '';
+
+      if (!rawTitle) {
+        if (colId === -1 && row[0] && String(row[0]).length > 5 && isNaN(Number(row[0]))) {
+          rawTitle = String(row[0]).trim();
+        } else if (row[1]) {
+          rawTitle = String(row[1]).trim();
+        } else if (row[0]) {
+          rawTitle = String(row[0]).trim();
+        }
+      }
+
+      if (!rawTitle || rawTitle.toLowerCase() === 'tên đề thi' || rawTitle.toLowerCase() === 'tên đề' || rawTitle.toLowerCase() === 'stt' || rawTitle.toLowerCase() === 'id') {
+        continue;
+      }
+
+      const prev = (rawId ? existingMap.get(rawId) : undefined) || titleMap.get(rawTitle.toLowerCase());
+      const id = rawId && rawId.startsWith('test-') ? rawId : (prev?.id || `test-${Date.now()}-${i}`);
+
+      const gradeNum = rawGrade ? (parseInt(rawGrade.replace(/[^0-9]/g, ''), 10) || 6) : (prev?.gradeLevel || 6);
+      const duration = rawDuration ? (parseInt(rawDuration.replace(/[^0-9]/g, ''), 10) || 45) : (prev?.durationMinutes || 45);
+      const questionCount = rawCount ? (parseInt(rawCount.replace(/[^0-9]/g, ''), 10) || 20) : (prev?.totalQuestions || 20);
+      const variantCode = rawVariant || prev?.variants?.[0]?.code || '101';
+      const author = rawAuthor || prev?.authorName || currentUser?.fullName || 'Giáo viên Tin học';
+      const createdAt = rawCreatedAt || prev?.createdAt || new Date().toISOString().split('T')[0];
+
+      let questionIds: string[] = [];
+      if (prev && prev.questionIds && prev.questionIds.length > 0) {
+        questionIds = prev.questionIds;
+      } else {
+        const gradeQuestions = allQuestions.filter((q) => q.gradeLevel === gradeNum);
+        questionIds = gradeQuestions.slice(0, questionCount).map((q) => q.id);
+      }
+
+      imported.push({
+        id,
+        title: rawTitle,
+        gradeLevel: gradeNum,
+        durationMinutes: duration,
+        totalQuestions: questionIds.length > 0 ? questionIds.length : questionCount,
+        totalPoints: prev?.totalPoints || 10,
+        questionIds,
+        variants: [{ code: variantCode, questionIds }],
+        createdBy: prev?.createdBy || currentUser?.id || 'user-admin-01',
+        authorName: author,
+        createdAt,
+        status: rawStatus.toUpperCase() === 'ARCHIVED' ? 'READY' : 'READY',
+        matrix: prev?.matrix || {
+          knowCount: Math.round(questionCount * 0.4),
+          understandCount: Math.round(questionCount * 0.3),
+          applyCount: Math.max(0, questionCount - Math.round(questionCount * 0.7)),
+          selectedTopics: []
+        }
+      });
+    }
+
+    return imported;
+  }
+
+  /**
+   * Tải danh sách Đề thi (sheet DeThi / Đề thi) từ Google Sheet về LMS (OAuth Direct)
+   */
   static async pullTestsFromSheet(
     spreadsheetId: string,
     accessToken: string
   ): Promise<number> {
     const { rows } = await this.readSheetWithFallback(
       spreadsheetId,
-      ['DeThi', 'Đề thi', 'Đề Thi', 'DETHI', 'dethi', 'Tests', 'Danh sách đề thi'],
+      ['DeThi', 'Đề thi', 'Đề Thi', 'DETHI', 'dethi', 'Tests', 'Danh sách đề thi', 'DS Đề thi', 'DS De thi', 'ĐỀ THI', 'Bài kiểm tra', 'BaiKiemTra'],
       'A1:Z',
       accessToken
     );
     if (!rows || rows.length <= 1) return 0;
 
-    let headerRowIdx = 0;
-    for (let rIdx = 0; rIdx < Math.min(5, rows.length); rIdx++) {
-      const r = rows[rIdx];
-      const joined = (r || []).map((c) => String(c || '').toLowerCase()).join(' ');
-      if (joined.includes('đề') || joined.includes('tên đề') || joined.includes('thời gian') || joined.includes('mã đề')) {
-        headerRowIdx = rIdx;
-        break;
-      }
-    }
-
-    const dataRows = rows.slice(headerRowIdx + 1);
-    const allQuestions = LMSStorageService.getQuestions();
-    const imported: Test[] = [];
-
-    for (let i = 0; i < dataRows.length; i++) {
-      const row = dataRows[i];
-      if (!row || (!row[0] && !row[1])) continue;
-
-      const id = String(row[0] || `test-${Date.now()}-${i}`).trim();
-      const title = String(row[1] || row[0] || 'Đề kiểm tra Tin học').trim();
-      if (!title || title.toLowerCase() === 'tên đề thi' || title.toLowerCase() === 'tên đề') continue;
-
-      const gradeStr = String(row[2] || '6');
-      const gradeLevel = parseInt(gradeStr.replace(/[^0-9]/g, ''), 10) || 6;
-      const durationMinutes = parseInt(String(row[3] || '45').replace(/[^0-9]/g, ''), 10) || 45;
-      const totalQuestions = parseInt(String(row[4] || '20').replace(/[^0-9]/g, ''), 10) || 20;
-      const variantCode = String(row[5] || '101').trim() || '101';
-      const authorName = String(row[6] || 'Giáo viên Tin học').trim();
-      const createdAt = String(row[7] || new Date().toISOString().split('T')[0]).trim();
-      const status = String(row[8] || 'READY').trim().toUpperCase() === 'ARCHIVED' ? 'READY' : 'READY';
-
-      const gradeQuestions = allQuestions.filter((q) => q.gradeLevel === gradeLevel);
-      const questionIds = gradeQuestions.slice(0, totalQuestions).map((q) => q.id);
-
-      imported.push({
-        id,
-        title,
-        gradeLevel,
-        durationMinutes,
-        totalQuestions: questionIds.length > 0 ? questionIds.length : totalQuestions,
-        totalPoints: 10,
-        questionIds,
-        variants: [{ code: variantCode, questionIds }],
-        createdBy: 'user-admin-01',
-        authorName,
-        createdAt: createdAt || new Date().toISOString().split('T')[0],
-        status,
-        matrix: {
-          knowCount: Math.round(totalQuestions * 0.4),
-          understandCount: Math.round(totalQuestions * 0.3),
-          applyCount: Math.max(0, totalQuestions - Math.round(totalQuestions * 0.7)),
-          selectedTopics: []
-        }
-      });
-    }
-
+    const imported = this.parseDeThiRows(rows);
     if (imported.length > 0) {
       LMSStorageService.importTests(imported);
       notifyChange('tests');
@@ -2101,60 +2173,144 @@ export class GoogleSheetsService {
       const res = await fetch(url);
       if (!res.ok) return { success: false, count: 0, error: `HTTP ${res.status}` };
       const data = await res.json();
-      if (!Array.isArray(data) || data.length <= 1) return { success: true, count: 0 };
+      if (!Array.isArray(data) || data.length === 0) return { success: true, count: 0 };
 
-      const rows = data.slice(1);
-      const allQuestions = LMSStorageService.getQuestions();
-      const imported: Test[] = [];
-
-      for (let i = 0; i < rows.length; i++) {
-        const row = rows[i];
-        if (!row || (!row[0] && !row[1])) continue;
-        const id = String(row[0] || `test-${Date.now()}-${i}`).trim();
-        const title = String(row[1] || row[0] || 'Đề kiểm tra Tin học').trim();
-        if (!title || title.toLowerCase() === 'tên đề thi' || title.toLowerCase() === 'tên đề') continue;
-
-        const gradeStr = String(row[2] || '6');
-        const gradeLevel = parseInt(gradeStr.replace(/[^0-9]/g, ''), 10) || 6;
-        const durationMinutes = parseInt(String(row[3] || '45').replace(/[^0-9]/g, ''), 10) || 45;
-        const totalQuestions = parseInt(String(row[4] || '20').replace(/[^0-9]/g, ''), 10) || 20;
-        const variantCode = String(row[5] || '101').trim() || '101';
-        const authorName = String(row[6] || 'Giáo viên Tin học').trim();
-        const createdAt = String(row[7] || new Date().toISOString().split('T')[0]).trim();
-        const status = String(row[8] || 'READY').trim().toUpperCase() === 'ARCHIVED' ? 'READY' : 'READY';
-
-        const gradeQuestions = allQuestions.filter((q) => q.gradeLevel === gradeLevel);
-        const questionIds = gradeQuestions.slice(0, totalQuestions).map((q) => q.id);
-
-        imported.push({
-          id,
-          title,
-          gradeLevel,
-          durationMinutes,
-          totalQuestions: questionIds.length > 0 ? questionIds.length : totalQuestions,
-          totalPoints: 10,
-          questionIds,
-          variants: [{ code: variantCode, questionIds }],
-          authorName,
-          createdBy: 'user-admin-01',
-          createdAt: createdAt || new Date().toISOString().split('T')[0],
-          status,
-          matrix: {
-            knowCount: Math.round(totalQuestions * 0.4),
-            understandCount: Math.round(totalQuestions * 0.3),
-            applyCount: Math.max(0, totalQuestions - Math.round(totalQuestions * 0.7)),
-            selectedTopics: []
-          }
-        });
-      }
+      const imported = this.parseDeThiRows(data);
       if (imported.length > 0) {
         LMSStorageService.importTests(imported);
         notifyChange('tests');
       }
       return { success: true, count: imported.length };
     } catch (e: any) {
-      return { success: false, count: 0, error: e.message };
+      return { success: false, count: 0, error: e.message || String(e) };
     }
+  }
+
+  /**
+   * Phân tích và trích xuất danh sách Đợt giao đề từ dữ liệu các hàng của sheet GiaoDe
+   */
+  static parseGiaoDeRows(rows: any[][]): Assignment[] {
+    if (!rows || rows.length === 0) return [];
+
+    let headerRowIdx = -1;
+    let colId = -1;
+    let colTitle = -1;
+    let colGrade = -1;
+    let colClasses = -1;
+    let colStart = -1;
+    let colEnd = -1;
+    let colPassword = -1;
+    let colReview = -1;
+    let colShuffle = -1;
+    let colAuthor = -1;
+    let colCreatedAt = -1;
+    let colStatus = -1;
+
+    for (let rIdx = 0; rIdx < Math.min(6, rows.length); rIdx++) {
+      const r = rows[rIdx];
+      if (!Array.isArray(r)) continue;
+      const joined = r.map((c) => String(c || '').toLowerCase()).join(' ');
+      if (
+        joined.includes('giao') ||
+        joined.includes('bài kiểm tra') ||
+        joined.includes('lớp') ||
+        joined.includes('thời gian')
+      ) {
+        headerRowIdx = rIdx;
+        r.forEach((cell, cIdx) => {
+          const h = String(cell || '').trim().toLowerCase();
+          if (/^(id|stt|id\s*đợt\s*giao|mã)$/i.test(h)) colId = cIdx;
+          else if (/^(tên\s*bài\s*kiểm\s*tra|tên\s*bài|tên\s*đề|bài\s*kiểm\s*tra|đề\s*thi)$/i.test(h) || h.includes('bài kiểm tra')) colTitle = cIdx;
+          else if (/^(khối|khối\s*lớp|grade)$/i.test(h)) colGrade = cIdx;
+          else if (/^(danh\s*sách\s*lớp|lớp|lớp\s*được\s*giao)$/i.test(h) || h.includes('danh sách lớp')) colClasses = cIdx;
+          else if (/^(thời\s*gian\s*bắt\s*đầu|bắt\s*đầu|start)$/i.test(h) || h.includes('bắt đầu')) colStart = cIdx;
+          else if (/^(thời\s*gian\s*kết\s*thúc|kết\s*thúc|hạn\s*nộp|end)$/i.test(h) || h.includes('kết thúc')) colEnd = cIdx;
+          else if (/^(mật\s*khẩu|password)$/i.test(h)) colPassword = cIdx;
+          else if (/^(cho\s*xem\s*đáp\s*án|xem\s*đáp\s*án)$/i.test(h) || h.includes('xem đáp án')) colReview = cIdx;
+          else if (/^(trộn\s*thứ\s*tự\s*câu\s*hỏi|trộn\s*câu\s*hỏi|trộn)$/i.test(h) || h.includes('trộn')) colShuffle = cIdx;
+          else if (/^(người\s*giao\s*đề|người\s*giao|giáo\s*viên)$/i.test(h) || h.includes('người giao')) colAuthor = cIdx;
+          else if (/^(ngày\s*tạo|ngày)$/i.test(h)) colCreatedAt = cIdx;
+          else if (/^(trạng\s*thái|status)$/i.test(h)) colStatus = cIdx;
+        });
+        break;
+      }
+    }
+
+    const dataRows = headerRowIdx >= 0 ? rows.slice(headerRowIdx + 1) : rows;
+    const classes = LMSStorageService.getClasses();
+    const tests = LMSStorageService.getTests();
+    const currentUser = LMSStorageService.getCurrentUser();
+    const existingAssigns = LMSStorageService.getAssignments();
+    const existingMap = new Map(existingAssigns.map((a) => [a.id, a]));
+    const titleMap = new Map(existingAssigns.map((a) => [a.testTitle.trim().toLowerCase(), a]));
+
+    const imported: Assignment[] = [];
+
+    for (let i = 0; i < dataRows.length; i++) {
+      const row = dataRows[i];
+      if (!row || row.length === 0) continue;
+
+      let rawId = colId >= 0 && row[colId] !== undefined ? String(row[colId]).trim() : '';
+      let rawTitle = colTitle >= 0 && row[colTitle] !== undefined ? String(row[colTitle]).trim() : '';
+      let rawGrade = colGrade >= 0 && row[colGrade] !== undefined ? String(row[colGrade]).trim() : '';
+      let rawClasses = colClasses >= 0 && row[colClasses] !== undefined ? String(row[colClasses]).trim() : '';
+      let rawStart = colStart >= 0 && row[colStart] !== undefined ? String(row[colStart]).trim() : '';
+      let rawEnd = colEnd >= 0 && row[colEnd] !== undefined ? String(row[colEnd]).trim() : '';
+      let rawPassword = colPassword >= 0 && row[colPassword] !== undefined ? String(row[colPassword]).trim() : '';
+      let rawReview = colReview >= 0 && row[colReview] !== undefined ? String(row[colReview]).trim() : '';
+      let rawShuffle = colShuffle >= 0 && row[colShuffle] !== undefined ? String(row[colShuffle]).trim() : '';
+      let rawAuthor = colAuthor >= 0 && row[colAuthor] !== undefined ? String(row[colAuthor]).trim() : '';
+      let rawCreatedAt = colCreatedAt >= 0 && row[colCreatedAt] !== undefined ? String(row[colCreatedAt]).trim() : '';
+      let rawStatus = colStatus >= 0 && row[colStatus] !== undefined ? String(row[colStatus]).trim() : '';
+
+      if (!rawTitle) {
+        if (colId === -1 && row[0] && String(row[0]).length > 5 && isNaN(Number(row[0]))) {
+          rawTitle = String(row[0]).trim();
+        } else if (row[1]) {
+          rawTitle = String(row[1]).trim();
+        }
+      }
+
+      if (!rawTitle || rawTitle.toLowerCase() === 'tên bài kiểm tra' || rawTitle.toLowerCase() === 'tên bài' || rawTitle.toLowerCase() === 'stt' || rawTitle.toLowerCase() === 'id') {
+        continue;
+      }
+
+      const prev = (rawId ? existingMap.get(rawId) : undefined) || titleMap.get(rawTitle.toLowerCase());
+      const id = rawId && rawId.startsWith('assign-') ? rawId : (prev?.id || `assign-${Date.now()}-${i}`);
+
+      const matchedTest = tests.find((t) => t.title.trim().toLowerCase() === rawTitle.toLowerCase() || t.id === prev?.testId);
+      const testId = matchedTest?.id || prev?.testId || (tests[0]?.id || `test-${id}`);
+      const gradeNum = matchedTest?.gradeLevel || (rawGrade ? parseInt(rawGrade.replace(/[^0-9]/g, ''), 10) : 6) || 6;
+
+      const classNames = rawClasses
+        ? rawClasses.split(/[,;]/).map((s) => s.trim()).filter(Boolean)
+        : (prev?.classNames || [classes[0]?.name || '6/1']);
+
+      const classIds = classNames.map((cn) => {
+        const found = classes.find((c) => c.name.toLowerCase() === cn.toLowerCase() || c.id === cn);
+        return found ? found.id : `cls-${cn.replace(/[^a-zA-Z0-9]/g, '-')}`;
+      });
+
+      imported.push({
+        id,
+        testId,
+        testTitle: matchedTest?.title || rawTitle,
+        gradeLevel: gradeNum,
+        classIds: classIds.length > 0 ? classIds : [classes[0]?.id || 'cls-6-1'],
+        classNames,
+        startTime: parseDateTimeFlexible(rawStart || prev?.startTime),
+        endTime: parseDateTimeFlexible(rawEnd || prev?.endTime || new Date(Date.now() + 7 * 86400000).toISOString()),
+        password: rawPassword === 'Không có' ? undefined : (rawPassword || undefined),
+        allowReviewAfterSubmit: rawReview.toLowerCase() !== 'không',
+        shuffleQuestions: rawShuffle.toLowerCase() !== 'không',
+        assignedBy: prev?.assignedBy || currentUser?.id || 'user-admin-01',
+        assignedByName: rawAuthor || prev?.assignedByName || currentUser?.fullName || 'Giáo viên',
+        createdAt: rawCreatedAt || prev?.createdAt || new Date().toISOString().split('T')[0],
+        status: rawStatus.toUpperCase() === 'CLOSED' ? 'CLOSED' : 'ACTIVE'
+      });
+    }
+
+    return imported;
   }
 
   /**
@@ -2166,74 +2322,13 @@ export class GoogleSheetsService {
   ): Promise<number> {
     const { rows } = await this.readSheetWithFallback(
       spreadsheetId,
-      ['GiaoDe', 'Giao đề', 'Giao Đề', 'GIAODE', 'giaode', 'Assignments', 'Danh sách giao đề'],
+      ['GiaoDe', 'Giao đề', 'Giao Đề', 'GIAODE', 'giaode', 'Assignments', 'Danh sách giao đề', 'DS Giao đề', 'GIAO ĐỀ', 'Đợt giao đề', 'DotGiaoDe'],
       'A1:Z',
       accessToken
     );
     if (!rows || rows.length <= 1) return 0;
 
-    let headerRowIdx = 0;
-    for (let rIdx = 0; rIdx < Math.min(5, rows.length); rIdx++) {
-      const r = rows[rIdx];
-      const joined = (r || []).map((c) => String(c || '').toLowerCase()).join(' ');
-      if (joined.includes('giao') || joined.includes('bài kiểm tra') || joined.includes('lớp') || joined.includes('thời gian')) {
-        headerRowIdx = rIdx;
-        break;
-      }
-    }
-
-    const dataRows = rows.slice(headerRowIdx + 1);
-    const classes = LMSStorageService.getClasses();
-    const tests = LMSStorageService.getTests();
-    const imported: Assignment[] = [];
-
-    for (let i = 0; i < dataRows.length; i++) {
-      const row = dataRows[i];
-      if (!row || (!row[0] && !row[1])) continue;
-
-      const id = String(row[0] || `assign-${Date.now()}-${i}`).trim();
-      const testTitle = String(row[1] || row[0] || 'Bài kiểm tra Tin học').trim();
-      if (!testTitle || testTitle.toLowerCase() === 'tên bài kiểm tra' || testTitle.toLowerCase() === 'tên bài') continue;
-
-      const gradeStr = String(row[2] || '6');
-      const gradeLevel = parseInt(gradeStr.replace(/[^0-9]/g, ''), 10) || 6;
-      const classNamesStr = String(row[3] || '').trim();
-      const classNames = classNamesStr ? classNamesStr.split(/[,;]/).map((s) => s.trim()).filter(Boolean) : [classes[0]?.name || '6/1'];
-      const classIds = classNames.map((cn) => classes.find((c) => c.name === cn)?.id || `cls-${cn.replace('/', '-')}`).filter(Boolean);
-
-      const startTime = String(row[4] || '').trim();
-      const endTime = String(row[5] || '').trim();
-      const password = String(row[6] || '').trim();
-      const allowReview = String(row[7] || '').trim().toLowerCase() !== 'không';
-      const shuffle = String(row[8] || '').trim().toLowerCase() !== 'không';
-      const assignedByName = String(row[9] || 'Giáo viên').trim();
-      const createdAt = String(row[10] || '').trim();
-      const status = String(row[11] || 'ACTIVE').trim().toUpperCase() === 'CLOSED' ? 'CLOSED' : 'ACTIVE';
-
-      const matchedTest = tests.find(
-        (t) => t.title.trim().toLowerCase() === testTitle.toLowerCase() || t.id === id
-      );
-      const testId = matchedTest?.id || (tests[0]?.id || `test-${id}`);
-
-      imported.push({
-        id,
-        testId,
-        testTitle: matchedTest?.title || testTitle,
-        gradeLevel: matchedTest?.gradeLevel || gradeLevel,
-        classIds: classIds.length > 0 ? classIds : [classes[0]?.id || 'cls-6-1'],
-        classNames,
-        startTime: parseDateTimeFlexible(startTime),
-        endTime: parseDateTimeFlexible(endTime || new Date(Date.now() + 7 * 86400000).toISOString()),
-        password: password === 'Không có' ? undefined : (password || undefined),
-        allowReviewAfterSubmit: allowReview,
-        shuffleQuestions: shuffle,
-        assignedBy: 'user-admin-01',
-        assignedByName,
-        createdAt: createdAt || new Date().toISOString().split('T')[0],
-        status
-      });
-    }
-
+    const imported = this.parseGiaoDeRows(rows);
     if (imported.length > 0) {
       LMSStorageService.importAssignments(imported);
       notifyChange('assignments');
@@ -2254,65 +2349,77 @@ export class GoogleSheetsService {
       const res = await fetch(url);
       if (!res.ok) return { success: false, count: 0, error: `HTTP ${res.status}` };
       const data = await res.json();
-      if (!Array.isArray(data) || data.length <= 1) return { success: true, count: 0 };
+      if (!Array.isArray(data) || data.length === 0) return { success: true, count: 0 };
 
-      const rows = data.slice(1);
-      const classes = LMSStorageService.getClasses();
-      const tests = LMSStorageService.getTests();
-      const imported: Assignment[] = [];
-
-      for (let i = 0; i < rows.length; i++) {
-        const row = rows[i];
-        if (!row || (!row[0] && !row[1])) continue;
-        const id = String(row[0] || `assign-${Date.now()}-${i}`).trim();
-        const testTitle = String(row[1] || row[0] || 'Bài kiểm tra Tin học').trim();
-        if (!testTitle || testTitle.toLowerCase() === 'tên bài kiểm tra' || testTitle.toLowerCase() === 'tên bài') continue;
-
-        const gradeStr = String(row[2] || '6');
-        const gradeLevel = parseInt(gradeStr.replace(/[^0-9]/g, ''), 10) || 6;
-        const classNamesStr = String(row[3] || '').trim();
-        const classNames = classNamesStr ? classNamesStr.split(/[,;]/).map((s) => s.trim()).filter(Boolean) : [classes[0]?.name || '6/1'];
-        const classIds = classNames.map((cn) => classes.find((c) => c.name === cn)?.id || `cls-${cn.replace('/', '-')}`).filter(Boolean);
-        const startTime = String(row[4] || '').trim();
-        const endTime = String(row[5] || '').trim();
-        const password = String(row[6] || '').trim();
-        const allowReview = String(row[7] || '').trim().toLowerCase() !== 'không';
-        const shuffle = String(row[8] || '').trim().toLowerCase() !== 'không';
-        const assignedByName = String(row[9] || 'Giáo viên').trim();
-        const createdAt = String(row[10] || '').trim();
-        const status = String(row[11] || 'ACTIVE').trim().toUpperCase() === 'CLOSED' ? 'CLOSED' : 'ACTIVE';
-
-        const matchedTest = tests.find(
-          (t) => t.title.trim().toLowerCase() === testTitle.toLowerCase() || t.id === id
-        );
-        const testId = matchedTest?.id || (tests[0]?.id || `test-${id}`);
-
-        imported.push({
-          id,
-          testId,
-          testTitle: matchedTest?.title || testTitle,
-          gradeLevel: matchedTest?.gradeLevel || gradeLevel,
-          classIds: classIds.length > 0 ? classIds : [classes[0]?.id || 'cls-6-1'],
-          classNames,
-          startTime: parseDateTimeFlexible(startTime),
-          endTime: parseDateTimeFlexible(endTime || new Date(Date.now() + 7 * 86400000).toISOString()),
-          password: password === 'Không có' ? undefined : (password || undefined),
-          allowReviewAfterSubmit: allowReview,
-          shuffleQuestions: shuffle,
-          assignedBy: 'user-admin-01',
-          assignedByName,
-          createdAt: createdAt || new Date().toISOString().split('T')[0],
-          status
-        });
-      }
+      const imported = this.parseGiaoDeRows(data);
       if (imported.length > 0) {
         LMSStorageService.importAssignments(imported);
         notifyChange('assignments');
       }
       return { success: true, count: imported.length };
     } catch (e: any) {
-      return { success: false, count: 0, error: e.message };
+      return { success: false, count: 0, error: e.message || String(e) };
     }
+  }
+
+  /**
+   * Đồng bộ / Ghi đè trực tiếp danh sách Đề thi lên Google Sheet (hỗ trợ cả OAuth và Apps Script)
+   */
+  static async pushTestsToGoogleSheet(): Promise<{ success: boolean; message: string }> {
+    const sheetId = getSavedSheetId();
+    const token = getGoogleAccessToken();
+    if (sheetId && token) {
+      try {
+        await this.syncEntity('tests', sheetId, token);
+        return { success: true, message: 'Đã lưu danh sách Đề thi lên sheet DeThi (OAuth Direct) thành công!' };
+      } catch (e: any) {
+        console.warn('OAuth sync tests error, trying Apps Script:', e);
+      }
+    }
+    const scriptUrl = getAppsScriptUrl();
+    if (scriptUrl) {
+      const rows = this.buildDeThiRows();
+      const res = await this.postToAppsScript({
+        action: 'batchPushAllData',
+        sheetId,
+        sheets: [{ name: 'DeThi', rows }]
+      });
+      if (res.success) {
+        return { success: true, message: 'Đã lưu danh sách Đề thi lên sheet DeThi (qua Apps Script) thành công!' };
+      }
+      return { success: false, message: res.error || 'Lỗi gửi lên Apps Script' };
+    }
+    return { success: false, message: 'Chưa kết nối Google Sheet hoặc cấu hình Apps Script' };
+  }
+
+  /**
+   * Đồng bộ / Ghi đè trực tiếp danh sách Giao đề lên Google Sheet (hỗ trợ cả OAuth và Apps Script)
+   */
+  static async pushAssignmentsToGoogleSheet(): Promise<{ success: boolean; message: string }> {
+    const sheetId = getSavedSheetId();
+    const token = getGoogleAccessToken();
+    if (sheetId && token) {
+      try {
+        await this.syncEntity('assignments', sheetId, token);
+        return { success: true, message: 'Đã lưu danh sách Giao bài lên sheet GiaoDe (OAuth Direct) thành công!' };
+      } catch (e: any) {
+        console.warn('OAuth sync assignments error, trying Apps Script:', e);
+      }
+    }
+    const scriptUrl = getAppsScriptUrl();
+    if (scriptUrl) {
+      const rows = this.buildGiaoDeRows();
+      const res = await this.postToAppsScript({
+        action: 'batchPushAllData',
+        sheetId,
+        sheets: [{ name: 'GiaoDe', rows }]
+      });
+      if (res.success) {
+        return { success: true, message: 'Đã lưu danh sách Giao bài lên sheet GiaoDe (qua Apps Script) thành công!' };
+      }
+      return { success: false, message: res.error || 'Lỗi gửi lên Apps Script' };
+    }
+    return { success: false, message: 'Chưa kết nối Google Sheet hoặc cấu hình Apps Script' };
   }
 
   /**

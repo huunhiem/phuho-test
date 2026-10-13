@@ -39,14 +39,22 @@ export const ExamRoom: React.FC<ExamRoomProps> = ({
   const test = tests.find((t) => t.id === assignment.testId) || tests[0];
 
   // Select variant (e.g. 101 or 102)
-  const variant = test.variants[0] || {
-    code: '101',
-    questionIds: test.questionIds
-  };
+  const variant = (test.variants && test.variants.length > 0)
+    ? test.variants[0]
+    : { code: '101', questionIds: test.questionIds || [] };
 
-  const examQuestions: Question[] = variant.questionIds
+  const validQuestionIds = (variant.questionIds && variant.questionIds.length > 0)
+    ? variant.questionIds
+    : (test.questionIds || []);
+
+  let examQuestions: Question[] = validQuestionIds
     .map((qId) => allQuestions.find((q) => q.id === qId))
     .filter((q): q is Question => Boolean(q));
+
+  if (examQuestions.length === 0) {
+    const gradeQuestions = allQuestions.filter((q) => q.gradeLevel === (test.gradeLevel || 6));
+    examQuestions = gradeQuestions.slice(0, test.totalQuestions || 20);
+  }
 
   const [currentIndex, setCurrentIndex] = useState(0);
 

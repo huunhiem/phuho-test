@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Send,
   Plus,
@@ -15,11 +15,14 @@ import {
   AlertTriangle,
   ArrowRight,
   Search,
-  Edit2
+  Edit2,
+  DownloadCloud,
+  UploadCloud,
+  Loader2
 } from 'lucide-react';
 import { Assignment, Test, User, ClassRoom } from '../../types';
-import { LMSStorageService } from '../../services/storage';
-import { GoogleSheetsService } from '../../services/googleSheetsService';
+import { LMSStorageService, safeFormatDateTimeForInput } from '../../services/storage';
+import { GoogleSheetsService, getSavedSheetId, getGoogleAccessToken, getAppsScriptUrl } from '../../services/googleSheetsService';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 import { onStorageChange } from '../../services/storageEvents';
 
@@ -42,41 +45,39 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
 
   const allClasses = LMSStorageService.getClasses();
   const classes = LMSStorageService.getClassesForTeacher(currentUser);
+  const assignableClasses = classes.length > 0 ? classes : allClasses;
 
   const allTests = LMSStorageService.getTests();
-  // Giáo viên thấy các đề thi do chính mình tạo ra hoặc mang tên mình
-  const tests = isPrivileged
-    ? allTests
-    : allTests.filter((t) => {
-        if (t.createdBy === currentUser.id) return true;
-        const authName = (t.authorName || '').toLowerCase().trim();
-        const uFull = (currentUser.fullName || '').toLowerCase().trim();
-        const uUser = (currentUser.username || '').toLowerCase().trim();
-        if (authName && (authName === uFull || authName === uUser || authName.includes(uFull) || uFull.includes(authName))) {
-          return true;
-        }
-        return false;
-      });
+  // Cho phép giáo viên lựa chọn tất cả các đề thi trong trường (bao gồm cả đề tải từ sheet DeThi) để giao bài
+  const assignableTests = allTests;
 
   const [assignments, setAssignments] = useState<Assignment[]>(() => LMSStorageService.getAssignments());
+  const [assignScopeFilter, setAssignScopeFilter] = useState<'ALL' | 'MINE'>('ALL');
+  const [isPullingAssignments, setIsPullingAssignments] = useState(false);
+  const [isSyncingAssignments, setIsSyncingAssignments] = useState(false);
+  const [syncAssignMessage, setSyncAssignMessage] = useState<string | null>(null);
+  const [validationError, setValidationError] = useState<string>('');
 
-  // Giáo viên thấy các đợt kiểm tra do chính mình giao hoặc giao cho lớp phụ trách
-  const visibleAssignments = isPrivileged
-    ? assignments
-    : assignments.filter((a) => {
-        if (a.assignedBy === currentUser.id) return true;
-        const abName = (a.assignedByName || '').toLowerCase().trim();
-        const uFull = (currentUser.fullName || '').toLowerCase().trim();
-        const uUser = (currentUser.username || '').toLowerCase().trim();
-        if (abName && (abName === uFull || abName === uUser || abName.includes(uFull) || uFull.includes(abName))) {
-          return true;
-        }
-        const myClassNames = new Set(classes.map((c) => c.name));
-        const myClassIds = new Set(classes.map((c) => c.id));
-        if (a.classNames?.some((cn) => myClassNames.has(cn))) return true;
-        if (a.classIds?.some((cid) => myClassIds.has(cid))) return true;
-        return false;
-      });
+  // Giáo viên có thể xem Tất cả đợt giao hoặc Đợt giao của tôi
+  const visibleAssignments = useMemo(() => {
+    if (isPrivileged || assignScopeFilter === 'ALL') {
+      return assignments;
+    }
+    return assignments.filter((a) => {
+      if (a.assignedBy === currentUser.id) return true;
+      const abName = (a.assignedByName || '').toLowerCase().trim();
+      const uFull = (currentUser.fullName || '').toLowerCase().trim();
+      const uUser = (currentUser.username || '').toLowerCase().trim();
+      if (abName && (abName === uFull || abName === uUser || abName.includes(uFull) || uFull.includes(abName))) {
+        return true;
+      }
+      const myClassNames = new Set(classes.map((c) => c.name));
+      const myClassIds = new Set(classes.map((c) => c.id));
+      if (a.classNames?.some((cn) => myClassNames.has(cn))) return true;
+      if (a.classIds?.some((cid) => myClassIds.has(cid))) return true;
+      return false;
+    });
+  }, [assignments, isPrivileged, assignScopeFilter, currentUser, classes]);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingAssign, setEditingAssign] = useState<Assignment | null>(null);
@@ -89,8 +90,8 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
   const [resultSearchQuery, setResultSearchQuery] = useState('');
 
   const [formData, setFormData] = useState({
-    testId: tests[0]?.id || '',
-    selectedClassIds: classes[0]?.id ? [classes[0].id] : ['cls-6-1'],
+    testId: assignableTests[0]?.id || '',
+    selectedClassIds: assignableClasses[0]?.id ? [assignableClasses[0].id] : ['cls-6-1'],
     startTime: new Date().toISOString().slice(0, 16),
     endTime: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 16),
     password: '',
@@ -102,11 +103,69 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
     setAssignments(LMSStorageService.getAssignments());
   };
 
+  // Lấy dữ liệu Giao đề từ Google Sheet (sheet GiaoDe)
+  const handlePullAssignmentsFromGoogleSheet = async () => {
+    setIsPullingAssignments(true);
+    setSyncAssignMessage('Đang lấy dữ liệu Giao đề từ sheet GiaoDe trên Google Sheet...');
+    try {
+      const sheetId = getSavedSheetId();
+      const token = getGoogleAccessToken();
+      let count = 0;
+      if (sheetId && token) {
+        try {
+          count = await GoogleSheetsService.pullAssignmentsFromSheet(sheetId, token);
+        } catch (oauthErr) {
+          console.warn('OAuth pullAssignments error, trying Apps Script:', oauthErr);
+          const res = await GoogleSheetsService.pullAssignmentsFromAppsScript();
+          if (res.success) {
+            count = res.count;
+          } else {
+            throw oauthErr;
+          }
+        }
+      } else {
+        const res = await GoogleSheetsService.pullAssignmentsFromAppsScript();
+        if (res.success) {
+          count = res.count;
+        } else {
+          throw new Error(res.error || 'Lỗi tải giao đề từ Apps Script');
+        }
+      }
+      refreshAssignments();
+      setToastMessage(`✓ Đã nạp thành công ${count} đợt giao đề từ sheet GiaoDe về giao diện!`);
+      setSyncAssignMessage(`✓ Đã lấy thành công ${count} đợt giao đề từ sheet GiaoDe lúc ${new Date().toLocaleTimeString('vi-VN')}`);
+    } catch (err: any) {
+      setSyncAssignMessage(`Lỗi tải giao đề: ${err.message || String(err)}`);
+    } finally {
+      setIsPullingAssignments(false);
+    }
+  };
+
+  // Đồng bộ toàn bộ đợt giao đề lên Google Sheet (sheet GiaoDe)
+  const handlePushAssignmentsToGoogleSheet = async () => {
+    setIsSyncingAssignments(true);
+    setSyncAssignMessage('Đang đồng bộ danh sách Giao đề lên sheet GiaoDe...');
+    try {
+      const res = await GoogleSheetsService.pushAssignmentsToGoogleSheet();
+      if (res.success) {
+        setToastMessage(`✓ ${res.message}`);
+        setSyncAssignMessage(`✓ ${res.message} lúc ${new Date().toLocaleTimeString('vi-VN')}`);
+      } else {
+        setSyncAssignMessage(`Thông báo: ${res.message}`);
+      }
+    } catch (err: any) {
+      setSyncAssignMessage(`Lỗi đồng bộ: ${err.message || String(err)}`);
+    } finally {
+      setIsSyncingAssignments(false);
+    }
+  };
+
   const handleOpenAdd = () => {
     setEditingAssign(null);
+    setValidationError('');
     setFormData({
-      testId: tests[0]?.id || '',
-      selectedClassIds: classes[0]?.id ? [classes[0].id] : ['cls-6-1'],
+      testId: assignableTests[0]?.id || '',
+      selectedClassIds: assignableClasses[0]?.id ? [assignableClasses[0].id] : ['cls-6-1'],
       startTime: new Date().toISOString().slice(0, 16),
       endTime: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 16),
       password: '',
@@ -118,11 +177,12 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
 
   const handleOpenEdit = (assign: Assignment) => {
     setEditingAssign(assign);
+    setValidationError('');
     setFormData({
       testId: assign.testId,
       selectedClassIds: assign.classIds,
-      startTime: assign.startTime ? new Date(assign.startTime).toISOString().slice(0, 16) : new Date().toISOString().slice(0, 16),
-      endTime: assign.endTime ? new Date(assign.endTime).toISOString().slice(0, 16) : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 16),
+      startTime: safeFormatDateTimeForInput(assign.startTime),
+      endTime: safeFormatDateTimeForInput(assign.endTime),
       password: assign.password || '',
       allowReviewAfterSubmit: assign.allowReviewAfterSubmit ?? true,
       shuffleQuestions: assign.shuffleQuestions ?? true
@@ -132,8 +192,16 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
-    const test = tests.find((t) => t.id === formData.testId) || allTests.find((t) => t.id === formData.testId);
-    if (!test || formData.selectedClassIds.length === 0) return;
+    const test = assignableTests.find((t) => t.id === formData.testId) || allTests.find((t) => t.id === formData.testId);
+    if (!test) {
+      setValidationError('Vui lòng chọn một đề kiểm tra cần giao!');
+      return;
+    }
+    if (formData.selectedClassIds.length === 0) {
+      setValidationError('Vui lòng chọn ít nhất một lớp học để giao bài!');
+      return;
+    }
+    setValidationError('');
 
     const classNames = allClasses
       .filter((c) => formData.selectedClassIds.includes(c.id))
@@ -160,6 +228,7 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
         action: 'saveAssignment',
         ...updatedAssignment
       }).catch((e) => console.warn('Lỗi ghi saveAssignment Apps Script:', e));
+      GoogleSheetsService.pushAssignmentsToGoogleSheet().catch(() => {});
       refreshAssignments();
       setIsModalOpen(false);
       setEditingAssign(null);
@@ -192,6 +261,7 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
       action: 'saveAssignment',
       ...newAssignment
     }).catch((e) => console.warn('Lỗi ghi saveAssignment Apps Script:', e));
+    GoogleSheetsService.pushAssignmentsToGoogleSheet().catch(() => {});
     refreshAssignments();
     setIsModalOpen(false);
     setToastMessage('✓ Đã giao bài kiểm tra thành công và tự động đồng bộ vào Google Sheet (sheet GiaoDe)!');
@@ -211,6 +281,7 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
         action: 'deleteAssignment',
         id: idToDelete
       }).catch((e) => console.warn('Lỗi xóa deleteAssignment Apps Script:', e));
+      GoogleSheetsService.pushAssignmentsToGoogleSheet().catch(() => {});
       refreshAssignments();
       setDeleteAssignId(null);
       setToastMessage('✓ Đã xóa đợt giao đề và tự động cập nhật Google Sheet (sheet GiaoDe)!');
@@ -244,14 +315,82 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
             Lên lịch thi trực tuyến, đặt hạn nộp bài và chỉ định các lớp làm bài kiểm tra Tin học (Tự động lưu vào Google Sheet)
           </p>
         </div>
-        <button
-          type="button"
-          onClick={handleOpenAdd}
-          className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-xs transition-colors self-start cursor-pointer"
-        >
-          <Send className="w-4 h-4" />
-          <span>Giao bài mới</span>
-        </button>
+        <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+          <button
+            type="button"
+            onClick={handlePullAssignmentsFromGoogleSheet}
+            disabled={isPullingAssignments}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-indigo-700 hover:bg-indigo-800 rounded-lg shadow-xs transition-colors disabled:opacity-50 cursor-pointer"
+            title="Lấy trực tiếp danh sách đợt giao đề từ sheet GiaoDe trên Google Sheet về giao diện"
+          >
+            {isPullingAssignments ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <DownloadCloud className="w-3.5 h-3.5" />}
+            <span>Lấy dữ liệu từ Sheet GiaoDe</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handlePushAssignmentsToGoogleSheet}
+            disabled={isSyncingAssignments}
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
+            title="Lưu toàn bộ danh sách đợt giao đề lên sheet GiaoDe"
+          >
+            {isSyncingAssignments ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <UploadCloud className="w-3.5 h-3.5" />}
+            <span>Đồng bộ Google Sheet</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleOpenAdd}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-xs transition-colors self-start cursor-pointer"
+          >
+            <Send className="w-4 h-4" />
+            <span>Giao bài mới</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Sync Status Banner */}
+      {syncAssignMessage && (
+        <div className="flex items-center justify-between p-3 bg-indigo-50 border border-indigo-200 rounded-xl text-xs text-indigo-900 shadow-xs">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-indigo-600 shrink-0" />
+            <span>{syncAssignMessage}</span>
+          </div>
+          <span className="font-semibold text-[11px] bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded">
+            Sheet: GiaoDe
+          </span>
+        </div>
+      )}
+
+      {/* Scope Filter Tabs */}
+      <div className="flex items-center justify-between gap-3 border-b border-slate-200 pb-3">
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setAssignScopeFilter('ALL')}
+            className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+              assignScopeFilter === 'ALL'
+                ? 'bg-indigo-600 text-white shadow-xs'
+                : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+            }`}
+          >
+            Tất cả đợt giao ({assignments.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setAssignScopeFilter('MINE')}
+            className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+              assignScopeFilter === 'MINE'
+                ? 'bg-indigo-600 text-white shadow-xs'
+                : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+            }`}
+          >
+            Đợt giao của tôi ({assignments.filter((a) => a.assignedBy === currentUser.id || a.assignedByName === currentUser.fullName).length})
+          </button>
+        </div>
+        <span className="text-xs text-slate-400">
+          Hiển thị <strong>{visibleAssignments.length}</strong> đợt giao bài
+        </span>
       </div>
 
       {/* Assignment List */}
@@ -261,7 +400,7 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
             Chưa có đợt kiểm tra nào được giao. Bấm "Giao bài mới" để bắt đầu.
           </div>
         ) : (
-          visibleAssignments.map((item) => (
+          visibleAssignments.map((item: Assignment) => (
             <div key={item.id} className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs space-y-4">
               <div className="flex items-start justify-between gap-2">
                 <div>
@@ -302,7 +441,7 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
                     <span>Lớp được giao:</span>
                   </span>
                   <div className="flex items-center gap-1">
-                    {item.classNames.map((cn) => (
+                    {item.classNames.map((cn: string) => (
                       <span key={cn} className="px-2 py-0.5 rounded bg-slate-100 text-slate-800 font-semibold text-[11px]">
                         Lớp {cn}
                       </span>
@@ -644,26 +783,36 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
             </h2>
 
             <form onSubmit={handleSave} className="space-y-3.5 text-xs">
+              {validationError && (
+                <div className="p-2.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs font-semibold">
+                  {validationError}
+                </div>
+              )}
+
               <div>
                 <label className="block font-medium text-slate-700 mb-1">Chọn đề kiểm tra *</label>
                 <select
                   required
                   value={formData.testId}
                   onChange={(e) => setFormData({ ...formData, testId: e.target.value })}
-                  className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium text-slate-800"
                 >
-                  {tests.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.title} (Khối {t.gradeLevel} - {t.durationMinutes}p)
-                    </option>
-                  ))}
+                  {assignableTests.length === 0 ? (
+                    <option value="">Chưa có đề thi nào trong hệ thống</option>
+                  ) : (
+                    assignableTests.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.title} (Khối {t.gradeLevel} - {t.durationMinutes}p)
+                      </option>
+                    ))
+                  )}
                 </select>
               </div>
 
               <div>
                 <label className="block font-medium text-slate-700 mb-1">Chọn các lớp làm bài *</label>
                 <div className="grid grid-cols-3 gap-2 p-2 bg-slate-50 rounded-lg border border-slate-200 max-h-32 overflow-y-auto">
-                  {classes.map((cls) => {
+                  {assignableClasses.map((cls) => {
                     const isChecked = formData.selectedClassIds.includes(cls.id);
                     return (
                       <label key={cls.id} className="flex items-center gap-1.5 cursor-pointer">

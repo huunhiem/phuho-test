@@ -30,7 +30,10 @@ import {
   AlertTriangle,
   ImageIcon,
   ExternalLink,
-  Edit2
+  Edit2,
+  DownloadCloud,
+  UploadCloud,
+  Loader2
 } from 'lucide-react';
 import {
   Test,
@@ -45,7 +48,7 @@ import {
 } from '../../types';
 import { LMSStorageService } from '../../services/storage';
 import { GoogleDriveService } from '../../services/googleDriveService';
-import { GoogleSheetsService } from '../../services/googleSheetsService';
+import { GoogleSheetsService, getSavedSheetId, getGoogleAccessToken, getAppsScriptUrl } from '../../services/googleSheetsService';
 import { onStorageChange } from '../../services/storageEvents';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 
@@ -322,8 +325,25 @@ export const TestBuilder: React.FC<TestBuilderProps> = ({ currentUser, onTestCre
   const [questions, setQuestions] = useState<Question[]>(() => LMSStorageService.getQuestions());
   const [lessons, setLessons] = useState(() => LMSStorageService.getLessons());
 
-  // Giáo viên nào tạo đề thi thì chỉ hiển thị ở tài khoản giáo viên đó
-  const visibleTests = isPrivileged ? tests : tests.filter((t) => t.createdBy === currentUser.id);
+  // Bộ lọc phạm vi đề thi và hiển thị
+  const [testScopeFilter, setTestScopeFilter] = useState<'ALL' | 'MINE'>('ALL');
+  const [isPullingTests, setIsPullingTests] = useState(false);
+  const [isSyncingTests, setIsSyncingTests] = useState(false);
+  const [syncTestMessage, setSyncTestMessage] = useState<string | null>(null);
+
+  // Hiển thị đề thi: Admin/Hiệu trưởng xem tất cả; Giáo viên có thể xem Tất cả đề trong trường hoặc Đề của tôi
+  const visibleTests = useMemo(() => {
+    if (isPrivileged || testScopeFilter === 'ALL') {
+      return tests;
+    }
+    return tests.filter((t) => {
+      if (t.createdBy === currentUser.id) return true;
+      const auth = (t.authorName || '').toLowerCase().trim();
+      const me = (currentUser.fullName || '').toLowerCase().trim();
+      const myUser = (currentUser.username || '').toLowerCase().trim();
+      return auth && (auth === me || auth === myUser || auth.includes(me) || me.includes(auth));
+    });
+  }, [tests, isPrivileged, testScopeFilter, currentUser]);
 
   useEffect(() => {
     const unsub = onStorageChange((entity) => {
@@ -339,6 +359,63 @@ export const TestBuilder: React.FC<TestBuilderProps> = ({ currentUser, onTestCre
     });
     return () => unsub();
   }, []);
+
+  // Lấy danh sách đề thi từ Google Sheet (sheet DeThi)
+  const handlePullTestsFromGoogleSheet = async () => {
+    setIsPullingTests(true);
+    setSyncTestMessage('Đang lấy dữ liệu Đề thi từ sheet DeThi trên Google Sheet...');
+    try {
+      const sheetId = getSavedSheetId();
+      const token = getGoogleAccessToken();
+      let count = 0;
+      if (sheetId && token) {
+        try {
+          count = await GoogleSheetsService.pullTestsFromSheet(sheetId, token);
+        } catch (oauthErr) {
+          console.warn('OAuth pullTests error, trying Apps Script:', oauthErr);
+          const res = await GoogleSheetsService.pullTestsFromAppsScript();
+          if (res.success) {
+            count = res.count;
+          } else {
+            throw oauthErr;
+          }
+        }
+      } else {
+        const res = await GoogleSheetsService.pullTestsFromAppsScript();
+        if (res.success) {
+          count = res.count;
+        } else {
+          throw new Error(res.error || 'Lỗi tải đề thi từ Apps Script');
+        }
+      }
+      refreshTests();
+      setToastMessage(`✓ Đã nạp thành công ${count} đề thi từ sheet DeThi về giao diện!`);
+      setSyncTestMessage(`✓ Đã lấy thành công ${count} đề thi từ sheet DeThi lúc ${new Date().toLocaleTimeString('vi-VN')}`);
+    } catch (err: any) {
+      setSyncTestMessage(`Lỗi tải đề thi: ${err.message || String(err)}`);
+    } finally {
+      setIsPullingTests(false);
+    }
+  };
+
+  // Đồng bộ toàn bộ đề thi lên Google Sheet (sheet DeThi)
+  const handlePushTestsToGoogleSheet = async () => {
+    setIsSyncingTests(true);
+    setSyncTestMessage('Đang đồng bộ danh sách Đề thi lên sheet DeThi...');
+    try {
+      const res = await GoogleSheetsService.pushTestsToGoogleSheet();
+      if (res.success) {
+        setToastMessage(`✓ ${res.message}`);
+        setSyncTestMessage(`✓ ${res.message} lúc ${new Date().toLocaleTimeString('vi-VN')}`);
+      } else {
+        setSyncTestMessage(`Thông báo: ${res.message}`);
+      }
+    } catch (err: any) {
+      setSyncTestMessage(`Lỗi đồng bộ: ${err.message || String(err)}`);
+    } finally {
+      setIsSyncingTests(false);
+    }
+  };
 
   // Form State for creating new test
   const [isCreating, setIsCreating] = useState(false);
@@ -978,23 +1055,93 @@ export const TestBuilder: React.FC<TestBuilderProps> = ({ currentUser, onTestCre
           </p>
         </div>
         {!isCreating && (
-          <button
-            type="button"
-            onClick={() => {
-              setEditingTest(null);
-              setIsCreating(true);
-              setAutoPickMessage('');
-              setShortfallWarning('');
-              setSelectedQuestionIds([]);
-              setQuestionPointsMap({});
-            }}
-            className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-xs transition-colors self-start cursor-pointer"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Tạo đề thi mới theo Ma trận</span>
-          </button>
+          <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+            <button
+              type="button"
+              onClick={handlePullTestsFromGoogleSheet}
+              disabled={isPullingTests}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-indigo-700 hover:bg-indigo-800 rounded-lg shadow-xs transition-colors disabled:opacity-50 cursor-pointer"
+              title="Lấy trực tiếp danh sách đề thi từ sheet DeThi trên Google Sheet về giao diện"
+            >
+              {isPullingTests ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <DownloadCloud className="w-3.5 h-3.5" />}
+              <span>Lấy dữ liệu từ Sheet DeThi</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handlePushTestsToGoogleSheet}
+              disabled={isSyncingTests}
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
+              title="Lưu toàn bộ danh sách đề thi lên sheet DeThi"
+            >
+              {isSyncingTests ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <UploadCloud className="w-3.5 h-3.5" />}
+              <span>Đồng bộ Google Sheet</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setEditingTest(null);
+                setIsCreating(true);
+                setAutoPickMessage('');
+                setShortfallWarning('');
+                setSelectedQuestionIds([]);
+                setQuestionPointsMap({});
+              }}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-xs transition-colors cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Tạo đề thi mới</span>
+            </button>
+          </div>
         )}
       </div>
+
+      {/* Sync Status Banner */}
+      {syncTestMessage && !isCreating && (
+        <div className="flex items-center justify-between p-3 bg-indigo-50 border border-indigo-200 rounded-xl text-xs text-indigo-900 shadow-xs">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-indigo-600 shrink-0" />
+            <span>{syncTestMessage}</span>
+          </div>
+          <span className="font-semibold text-[11px] bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded">
+            Sheet: DeThi
+          </span>
+        </div>
+      )}
+
+      {/* Scope Filter Tabs */}
+      {!isCreating && (
+        <div className="flex items-center justify-between gap-3 border-b border-slate-200 pb-3">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setTestScopeFilter('ALL')}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+                testScopeFilter === 'ALL'
+                  ? 'bg-indigo-600 text-white shadow-xs'
+                  : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+              }`}
+            >
+              Tất cả đề thi ({tests.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setTestScopeFilter('MINE')}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+                testScopeFilter === 'MINE'
+                  ? 'bg-indigo-600 text-white shadow-xs'
+                  : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+              }`}
+            >
+              Đề thi của tôi ({tests.filter((t) => t.createdBy === currentUser.id || t.authorName === currentUser.fullName).length})
+            </button>
+          </div>
+          <span className="text-xs text-slate-400">
+            Hiển thị <strong>{visibleTests.length}</strong> đề thi
+          </span>
+        </div>
+      )}
 
       {/* Test Creation / Editing Form */}
       {isCreating ? (

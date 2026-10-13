@@ -11,6 +11,7 @@ import {
   QuestionDifficulty,
   QuestionType,
   Test,
+  TestVariant,
   Assignment,
   Submission,
   QuestionAnalysisItem,
@@ -93,23 +94,44 @@ export function parseDateTimeFlexible(val: any): string {
     return new Date(parsedDirect).toISOString();
   }
 
-  // Định dạng Việt Nam: "14:30:00 12/10/2026" hoặc "14:30 12/10/2026"
-  const viTimeFirst = s.match(/^(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?\s+(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})$/);
+  // Chuẩn hóa chuỗi ngày giờ, loại bỏ dấu phẩy thừa
+  const cleanStr = s.replace(/,\s*/g, ' ').trim();
+
+  // Định dạng Việt Nam giờ trước: "14:30:00 12/10/2026" hoặc "14:30 12/10/2026"
+  const viTimeFirst = cleanStr.match(/^(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?\s+(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})$/);
   if (viTimeFirst) {
     const [, h, m, sec, d, mo, y] = viTimeFirst;
     const date = new Date(Number(y), Number(mo) - 1, Number(d), Number(h), Number(m), Number(sec || 0));
     if (!isNaN(date.getTime())) return date.toISOString();
   }
 
-  // Định dạng Việt Nam: "12/10/2026 14:30:00" hoặc "12/10/2026 14:30" hoặc "12/10/2026"
-  const viDateFirst = s.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?$/);
+  // Định dạng Việt Nam ngày trước: "12/10/2026 14:30:00" hoặc "12/10/2026 14:30" hoặc "12/10/2026"
+  const viDateFirst = cleanStr.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?$/);
   if (viDateFirst) {
     const [, d, mo, y, h, m, sec] = viDateFirst;
     const date = new Date(Number(y), Number(mo) - 1, Number(d), Number(h || 0), Number(m || 0), Number(sec || 0));
     if (!isNaN(date.getTime())) return date.toISOString();
   }
 
+  // Định dạng năm trước: "2026-10-12 14:30:00" hoặc "2026/10/12 14:30"
+  const ymdFormat = cleanStr.match(/^(\d{4})[\/\-\.](\d{1,2})[\/\-\.](\d{1,2})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?$/);
+  if (ymdFormat) {
+    const [, y, mo, d, h, m, sec] = ymdFormat;
+    const date = new Date(Number(y), Number(mo) - 1, Number(d), Number(h || 0), Number(m || 0), Number(sec || 0));
+    if (!isNaN(date.getTime())) return date.toISOString();
+  }
+
   return new Date().toISOString();
+}
+
+export function safeFormatDateTimeForInput(val: any): string {
+  try {
+    const iso = parseDateTimeFlexible(val);
+    const d = new Date(iso);
+    return isNaN(d.getTime()) ? new Date().toISOString().slice(0, 16) : d.toISOString().slice(0, 16);
+  } catch {
+    return new Date().toISOString().slice(0, 16);
+  }
 }
 
 // Hàm chuẩn hóa và ánh xạ Chủ đề môn Tin học theo Bộ sách Kết nối tri thức và cuộc sống (K6-K9)
@@ -341,11 +363,17 @@ export class LMSStorageService {
   static importClasses(newClasses: ClassRoom[], replaceAll = true): void {
     if (!newClasses || newClasses.length === 0) return;
 
-    // Lọc và chỉ giữ lại những lớp học thực tế hợp lệ (Khối 6-9, định dạng như 6/1, 6A, 7/2, 8/7, 9/1, v.v.)
+    // Lọc và chỉ giữ lại những lớp học thực tế hợp lệ (chấp nhận mọi định dạng lớp: 6/1, 7A, 8/7, 9/1, 10A1, 12A, v.v.)
     const validNewClasses = newClasses.filter((c) => {
       if (!c || !c.name) return false;
-      const clean = c.name.trim().replace(/^(lớp|lop)\s+/i, '');
-      return /^[6-9][\/\.\-_A-Za-z0-9]+$/i.test(clean);
+      const clean = c.name.trim().toLowerCase();
+      if (!clean || clean === 'tên lớp' || clean === 'lớp' || clean === 'khối' || clean === 'stt' || clean === 'mã lớp') {
+        return false;
+      }
+      if (clean.startsWith('tổng') || clean.startsWith('cộng') || clean.includes('học sinh')) {
+        return false;
+      }
+      return true;
     });
     if (validNewClasses.length === 0) return;
 
@@ -1257,7 +1285,7 @@ export class LMSStorageService {
         createdBy: t.createdBy || prev?.createdBy || 'user-admin-01',
         authorName: t.authorName || prev?.authorName || 'Giáo viên Tin học',
         createdAt: t.createdAt || prev?.createdAt || new Date().toISOString().split('T')[0],
-        status: t.status === 'ARCHIVED' ? 'READY' : (t.status || 'READY'),
+        status: (t.status === 'DRAFT' ? 'DRAFT' : 'READY') as 'DRAFT' | 'READY',
         matrix: t.matrix || prev?.matrix || {
           knowCount: Math.round(totalQuestions * 0.4),
           understandCount: Math.round(totalQuestions * 0.3),

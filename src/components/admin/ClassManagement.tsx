@@ -465,11 +465,19 @@ export const ClassManagement: React.FC = () => {
       }
 
       // 3. Liên kết hai chiều phân công giáo viên và cập nhật giao diện
-      LMSStorageService.refreshTeacherAssignmentsFromClasses();
-      refreshData();
+      if (count > 0) {
+        LMSStorageService.refreshTeacherAssignmentsFromClasses();
+        const updatedList = LMSStorageService.getClasses();
+        setClasses(updatedList);
+        setUsers(LMSStorageService.getUsers());
 
-      setSyncMessage(`✓ Đã nạp thành công ${count} lớp học và phân công từ sheet LopHoc về giao diện!`);
-      showToast(`✓ Đã lấy thành công ${count} lớp học và phân công từ Sheet LopHoc hiển thị ở giao diện!`);
+        const classNamesStr = updatedList.map((c) => c.name).join(', ');
+        setSyncMessage(`✓ Đã nạp chính xác ${updatedList.length} lớp học từ Google Sheet: ${classNamesStr}`);
+        showToast(`✓ Đã nạp chính xác ${updatedList.length} lớp học: ${classNamesStr}`);
+      } else {
+        setSyncMessage('⚠️ Không tìm thấy dòng lớp học nào từ Google Sheet (sheet LopHoc). Vui lòng kiểm tra bảng tính có sheet "LopHoc" và các cột Tên lớp.');
+        showToast('⚠️ Không tìm thấy dữ liệu lớp học mới từ Google Sheet.');
+      }
     } catch (err: any) {
       setSyncMessage(`Lỗi tải từ Google Sheet: ${err.message || String(err)}`);
     } finally {

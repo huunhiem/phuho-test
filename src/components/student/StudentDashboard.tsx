@@ -42,9 +42,17 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser 
   const studentSubs = submissions.filter((s) => s.studentId === currentUser.id);
 
   // Assignments for this student's class
-  const studentAssignments = assignments.filter(
-    (a) => !currentUser.classId || a.classIds.includes(currentUser.classId)
-  );
+  const studentAssignments = assignments.filter((a) => {
+    if (!currentUser.classId) return true;
+    const cid = currentUser.classId;
+    const cName = studentClass;
+    return (
+      a.classIds.includes(cid) ||
+      a.classNames.includes(cName) ||
+      a.classNames.some((cn) => cn === cName || cn.replace('/', '-') === cid.replace('cls-', '') || `cls-${cn.replace('/', '-')}` === cid) ||
+      a.classIds.some((id) => id === cid || id === cName || id.replace('cls-', '').replace('-', '/') === cName)
+    );
+  });
 
   const completedAssignmentIds = new Set(studentSubs.map((s) => s.assignmentId));
 
