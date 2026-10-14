@@ -58,7 +58,7 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
   // Riêng Tài khoản quản trị hiển thị tất cả đề; Giáo viên chỉ thấy và giao đề do chính tài khoản mình tạo
   const assignableTests = useMemo(() => {
     if (isAdmin) return allTests;
-    return allTests.filter((t) => LMSStorageService.isTestOwner(t, currentUser));
+    return allTests.filter((t) => LMSStorageService.isTestCreatedByUser(t, currentUser));
   }, [allTests, isAdmin, currentUser]);
 
   const [assignments, setAssignments] = useState<Assignment[]>(() => LMSStorageService.getAssignments());
@@ -72,12 +72,12 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
   const visibleAssignments = useMemo(() => {
     if (isAdmin) {
       if (assignScopeFilter === 'MINE') {
-        return assignments.filter((a) => LMSStorageService.isAssignmentOwner(a, currentUser));
+        return assignments.filter((a) => LMSStorageService.isAssignmentCreatedByUser(a, currentUser));
       }
       return assignments;
     }
     // Giáo viên thông thường: Đợt giao của tài khoản nào thì CHỈ hiển thị ở tài khoản đó
-    return assignments.filter((a) => LMSStorageService.isAssignmentOwner(a, currentUser));
+    return assignments.filter((a) => LMSStorageService.isAssignmentCreatedByUser(a, currentUser));
   }, [assignments, isAdmin, assignScopeFilter, currentUser]);
 
   // Modal chi tiết bài làm học sinh
@@ -412,7 +412,7 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
                   : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
               }`}
             >
-              Đợt giao do tôi tạo ({assignments.filter((a) => LMSStorageService.isAssignmentOwner(a, currentUser)).length})
+              Đợt giao do tôi tạo ({assignments.filter((a) => LMSStorageService.isAssignmentCreatedByUser(a, currentUser)).length})
             </button>
           </div>
         ) : (

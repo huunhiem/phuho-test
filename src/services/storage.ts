@@ -552,29 +552,53 @@ export class LMSStorageService {
   }
 
   /**
-   * Kiểm tra quyền sở hữu Đề thi:
-   * Đề tài khoản nào Tạo thì chỉ xuất hiện ở Tài khoản đó.
-   * Riêng Tài khoản quản trị hiển thị tất cả.
+   * Kiểm tra xem Đề thi có phải do chính tài khoản này tạo hay không (không phụ thuộc quyền admin)
    */
-  static isTestOwner(test: Test, user: User): boolean {
+  static isTestCreatedByUser(test: Test, user: User): boolean {
     if (!test || !user) return false;
-    if (user.role === 'ADMIN') return true;
-    if (test.createdBy && test.createdBy === user.id) return true;
-    if (test.authorName && this.isTeacherNameMatch(test.authorName, user)) return true;
+    if (test.createdBy && (test.createdBy === user.id || (user.username && test.createdBy.toLowerCase() === user.username.toLowerCase()))) {
+      return true;
+    }
+    if (test.authorName && this.isTeacherNameMatch(test.authorName, user)) {
+      return true;
+    }
     return false;
   }
 
   /**
-   * Kiểm tra quyền sở hữu Đợt giao đề:
-   * Tài khoản nào Giao đề thì chỉ hiển thị ở tài khoản đó.
+   * Kiểm tra quyền xem / quản lý Đề thi:
    * Riêng Tài khoản quản trị hiển thị tất cả.
+   * Tài khoản giáo viên: Chỉ xuất hiện đề do chính tài khoản đó tạo.
+   */
+  static isTestOwner(test: Test, user: User): boolean {
+    if (!test || !user) return false;
+    if (user.role === 'ADMIN') return true;
+    return this.isTestCreatedByUser(test, user);
+  }
+
+  /**
+   * Kiểm tra xem Đợt giao đề có phải do chính tài khoản này giao hay không (không phụ thuộc quyền admin)
+   */
+  static isAssignmentCreatedByUser(assignment: Assignment, user: User): boolean {
+    if (!assignment || !user) return false;
+    if (assignment.assignedBy && (assignment.assignedBy === user.id || (user.username && assignment.assignedBy.toLowerCase() === user.username.toLowerCase()))) {
+      return true;
+    }
+    if (assignment.assignedByName && this.isTeacherNameMatch(assignment.assignedByName, user)) {
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Kiểm tra quyền xem / quản lý Đợt giao đề:
+   * Riêng Tài khoản quản trị hiển thị tất cả.
+   * Tài khoản giáo viên: Chỉ hiển thị đợt giao do chính tài khoản đó giao.
    */
   static isAssignmentOwner(assignment: Assignment, user: User): boolean {
     if (!assignment || !user) return false;
     if (user.role === 'ADMIN') return true;
-    if (assignment.assignedBy && assignment.assignedBy === user.id) return true;
-    if (assignment.assignedByName && this.isTeacherNameMatch(assignment.assignedByName, user)) return true;
-    return false;
+    return this.isAssignmentCreatedByUser(assignment, user);
   }
 
   /**
@@ -1454,10 +1478,28 @@ export class LMSStorageService {
   }
 
   static importSubmissions(newSubs: Submission[]): void {
+    if (!Array.isArray(newSubs) || newSubs.length === 0) return;
     const existing = this.getSubmissions();
     const map = new Map<string, Submission>();
     existing.forEach((s) => map.set(s.id, s));
-    newSubs.forEach((s) => map.set(s.id, s));
+    newSubs.forEach((s) => {
+      const prev = map.get(s.id);
+      if (prev) {
+        // Giữ lại assignmentId, testId, answers gốc nếu bản ghi mới là bản tóm tắt từ Google Sheet
+        const assignmentId = s.assignmentId && s.assignmentId !== 'assign-sync' ? s.assignmentId : (prev.assignmentId || s.assignmentId);
+        const testId = s.testId && s.testId !== 'test-sync' ? s.testId : (prev.testId || s.testId);
+        const answers = s.answers && Object.keys(s.answers).length > 0 ? s.answers : (prev.answers || {});
+        map.set(s.id, {
+          ...prev,
+          ...s,
+          assignmentId,
+          testId,
+          answers
+        });
+      } else {
+        map.set(s.id, s);
+      }
+    });
     const merged = Array.from(map.values());
     setStored(STORAGE_KEYS.SUBMISSIONS, merged);
     notifyChange('submissions');
@@ -1847,20 +1889,24 @@ export class LMSStorageService {
       if (currentAssignment && s.assignmentId === currentAssignment.id) {
         return true;
       }
-      // Nếu cùng testId hoặc cùng tên đề thi
+      // Nếu cùng testId hoặc cùng tên đề thi (khớp chính xác hoặc chứa nhau)
       if (currentAssignment) {
+        const aTitle = (currentAssignment.testTitle || '').trim().toLowerCase();
+        const sTitle = (s.testTitle || '').trim().toLowerCase();
         const isSameTest =
           s.testId === currentAssignment.testId ||
-          (s.testTitle && currentAssignment.testTitle && s.testTitle.trim().toLowerCase() === currentAssignment.testTitle.trim().toLowerCase());
+          (Boolean(sTitle && aTitle) && (sTitle === aTitle || sTitle.includes(aTitle) || aTitle.includes(sTitle)));
         if (isSameTest) {
           if (targetClassIdSet.size === 0 && targetClassNameSet.size === 0) return true;
           return isClassMatched(s.classId) || isClassMatched(s.className);
         }
         return false;
       } else if (currentTest) {
+        const tTitle = (currentTest.title || '').trim().toLowerCase();
+        const sTitle = (s.testTitle || '').trim().toLowerCase();
         const isSameTest =
           s.testId === currentTest.id ||
-          (s.testTitle && currentTest.title && s.testTitle.trim().toLowerCase() === currentTest.title.trim().toLowerCase());
+          (Boolean(sTitle && tTitle) && (sTitle === tTitle || sTitle.includes(tTitle) || tTitle.includes(sTitle)));
         if (isSameTest) {
           if (targetClassIdSet.size === 0 && targetClassNameSet.size === 0) return true;
           return isClassMatched(s.classId) || isClassMatched(s.className);
@@ -1921,7 +1967,21 @@ export class LMSStorageService {
     const submittedStudentIds = new Set<string>();
     const submittedStudentCodes = new Set<string>();
 
+    // Khử trùng lặp: Nếu 1 học sinh nộp nhiều lần, giữ lại bài nộp có điểm cao nhất hoặc mới nhất
+    const studentSubMap = new Map<string, Submission>();
     matchingSubs.forEach((sub) => {
+      const studentKey = (sub.studentId || sub.studentCode || sub.id).toLowerCase();
+      const existing = studentSubMap.get(studentKey);
+      if (!existing) {
+        studentSubMap.set(studentKey, sub);
+      } else {
+        if (sub.score > existing.score || new Date(sub.submittedAt).getTime() > new Date(existing.submittedAt).getTime()) {
+          studentSubMap.set(studentKey, sub);
+        }
+      }
+    });
+
+    studentSubMap.forEach((sub) => {
       submittedStudentIds.add(sub.studentId);
       if (sub.studentCode) submittedStudentCodes.add(sub.studentCode.toLowerCase());
       const stu = allUsers.find(

@@ -335,12 +335,12 @@ export const TestBuilder: React.FC<TestBuilderProps> = ({ currentUser, onTestCre
   const visibleTests = useMemo(() => {
     if (isAdmin) {
       if (testScopeFilter === 'MINE') {
-        return tests.filter((t) => LMSStorageService.isTestOwner(t, currentUser));
+        return tests.filter((t) => LMSStorageService.isTestCreatedByUser(t, currentUser));
       }
       return tests;
     }
     // Tài khoản giáo viên: Đề tài khoản nào Tạo thì CHỈ xuất hiện ở Tài khoản đó
-    return tests.filter((t) => LMSStorageService.isTestOwner(t, currentUser));
+    return tests.filter((t) => LMSStorageService.isTestCreatedByUser(t, currentUser));
   }, [tests, isAdmin, testScopeFilter, currentUser]);
 
   useEffect(() => {
@@ -1150,7 +1150,7 @@ export const TestBuilder: React.FC<TestBuilderProps> = ({ currentUser, onTestCre
                     : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
                 }`}
               >
-                Đề thi do tôi tạo ({tests.filter((t) => LMSStorageService.isTestOwner(t, currentUser)).length})
+                Đề thi do tôi tạo ({tests.filter((t) => LMSStorageService.isTestCreatedByUser(t, currentUser)).length})
               </button>
             </div>
           ) : (

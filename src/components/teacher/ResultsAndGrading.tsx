@@ -74,7 +74,7 @@ export const ResultsAndGrading: React.FC<ResultsAndGradingProps> = ({ currentUse
 
   const visibleAssignments = isAdmin
     ? assignments
-    : assignments.filter((a) => LMSStorageService.isAssignmentOwner(a, currentUser));
+    : assignments.filter((a) => LMSStorageService.isAssignmentCreatedByUser(a, currentUser));
 
   // Compute detailed participation report using LMSStorageService
   const report = useMemo(() => {

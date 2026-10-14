@@ -1558,6 +1558,10 @@ export class GoogleSheetsService {
     const activeUsers = LMSStorageService.getUsers().filter((u) => u.status !== 'DELETED');
     const activeStudentCodes = new Set(activeUsers.map((u) => u.studentCode).filter(Boolean));
     const activeUserByName = new Map(activeUsers.map((u) => [u.fullName.toLowerCase(), u]));
+    const allAssignments = LMSStorageService.getAssignments();
+    const allTests = LMSStorageService.getTests();
+    const existingSubs = LMSStorageService.getSubmissions();
+    const existingSubMap = new Map(existingSubs.map((s) => [s.id, s]));
 
     const importedSubs: Submission[] = [];
 
@@ -1591,10 +1595,35 @@ export class GoogleSheetsService {
       const studentId = matchedUser?.id || `user-student-${studentCode}`;
       const gradeNum = parseInt(String(className || '').replace(/[^0-9]/g, '').slice(0, 1), 10) || 6;
 
+      const existingSub = existingSubMap.get(id);
+      const cleanTestTitle = testTitle.toLowerCase();
+      const matchedAssignment = allAssignments.find((a) => {
+        const aTitle = (a.testTitle || '').toLowerCase();
+        const titleOk = aTitle === cleanTestTitle || aTitle.includes(cleanTestTitle) || cleanTestTitle.includes(aTitle);
+        const classOk = !className || (a.classNames || []).some((cn) => cn.toLowerCase() === className.toLowerCase());
+        return titleOk && classOk;
+      }) || allAssignments.find((a) => {
+        const aTitle = (a.testTitle || '').toLowerCase();
+        return aTitle === cleanTestTitle || aTitle.includes(cleanTestTitle) || cleanTestTitle.includes(aTitle);
+      });
+
+      const matchedTest = allTests.find((t) => {
+        const tTitle = (t.title || '').toLowerCase();
+        return tTitle === cleanTestTitle || tTitle.includes(cleanTestTitle) || cleanTestTitle.includes(tTitle);
+      });
+
+      const finalAssignmentId = existingSub?.assignmentId && existingSub.assignmentId !== 'assign-sync'
+        ? existingSub.assignmentId
+        : (matchedAssignment?.id || 'assign-01');
+
+      const finalTestId = existingSub?.testId && existingSub.testId !== 'test-sync'
+        ? existingSub.testId
+        : (matchedTest?.id || matchedAssignment?.testId || 'test-th6-gk1');
+
       importedSubs.push({
         id,
-        assignmentId: 'assign-sync',
-        testId: 'test-sync',
+        assignmentId: finalAssignmentId,
+        testId: finalTestId,
         studentId,
         studentName: matchedUser?.fullName || studentName,
         studentCode: matchedUser?.studentCode || studentCode,
@@ -1603,7 +1632,7 @@ export class GoogleSheetsService {
         gradeLevel: gradeNum,
         testTitle,
         variantCode,
-        answers: {},
+        answers: existingSub?.answers || {},
         score,
         maxScore: 10,
         totalQuestions,
@@ -2594,6 +2623,10 @@ export class GoogleSheetsService {
       const activeUsers = LMSStorageService.getUsers().filter((u) => u.status !== 'DELETED');
       const activeStudentCodes = new Set(activeUsers.map((u) => u.studentCode).filter(Boolean));
       const activeUserByName = new Map(activeUsers.map((u) => [u.fullName.toLowerCase(), u]));
+      const allAssignments = LMSStorageService.getAssignments();
+      const allTests = LMSStorageService.getTests();
+      const existingSubs = LMSStorageService.getSubmissions();
+      const existingSubMap = new Map(existingSubs.map((s) => [s.id, s]));
       const importedSubs: Submission[] = [];
 
       for (let i = 0; i < rows.length; i++) {
@@ -2621,10 +2654,35 @@ export class GoogleSheetsService {
         const studentId = matchedUser?.id || `user-student-${studentCode || id}`;
         const gradeNum = parseInt(String(className || '').replace(/[^0-9]/g, '').slice(0, 1), 10) || 6;
 
+        const existingSub = existingSubMap.get(id);
+        const cleanTestTitle = testTitle.toLowerCase();
+        const matchedAssignment = allAssignments.find((a) => {
+          const aTitle = (a.testTitle || '').toLowerCase();
+          const titleOk = aTitle === cleanTestTitle || aTitle.includes(cleanTestTitle) || cleanTestTitle.includes(aTitle);
+          const classOk = !className || (a.classNames || []).some((cn) => cn.toLowerCase() === className.toLowerCase());
+          return titleOk && classOk;
+        }) || allAssignments.find((a) => {
+          const aTitle = (a.testTitle || '').toLowerCase();
+          return aTitle === cleanTestTitle || aTitle.includes(cleanTestTitle) || cleanTestTitle.includes(aTitle);
+        });
+
+        const matchedTest = allTests.find((t) => {
+          const tTitle = (t.title || '').toLowerCase();
+          return tTitle === cleanTestTitle || tTitle.includes(cleanTestTitle) || cleanTestTitle.includes(tTitle);
+        });
+
+        const finalAssignmentId = existingSub?.assignmentId && existingSub.assignmentId !== 'assign-sync'
+          ? existingSub.assignmentId
+          : (matchedAssignment?.id || 'assign-01');
+
+        const finalTestId = existingSub?.testId && existingSub.testId !== 'test-sync'
+          ? existingSub.testId
+          : (matchedTest?.id || matchedAssignment?.testId || 'test-th6-gk1');
+
         importedSubs.push({
           id,
-          assignmentId: 'assign-sync',
-          testId: 'test-sync',
+          assignmentId: finalAssignmentId,
+          testId: finalTestId,
           studentId,
           studentName: matchedUser?.fullName || studentName,
           studentCode: matchedUser?.studentCode || studentCode,
@@ -2633,7 +2691,7 @@ export class GoogleSheetsService {
           gradeLevel: gradeNum,
           testTitle,
           variantCode,
-          answers: {},
+          answers: existingSub?.answers || {},
           score,
           maxScore: 10,
           totalQuestions,
