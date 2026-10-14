@@ -506,6 +506,7 @@ export class LMSStorageService {
     const tCode = (teacherUser.teacherCode || '').toLowerCase().trim();
     const tEmail = (teacherUser.email || '').toLowerCase().trim().split('@')[0];
     const tLastName = tClean.split(/\s+/).pop() || '';
+    const tWords = tClean.split(/\s+/).filter(Boolean);
 
     const splitNames = teacherString.split(/[,;/+\n]/).map((s) => cleanTitle(s)).filter(Boolean);
 
@@ -524,26 +525,55 @@ export class LMSStorageService {
         return true;
       }
 
-      // 2. Chứa chuỗi nhau
-      if (tClean && (item.includes(tClean) || tClean.includes(item))) {
-        return true;
-      }
-      if (tFull && (item.includes(tFull) || tFull.includes(item))) {
-        return true;
-      }
-      if (tUser && (item === tUser || item.includes(tUser))) {
-        return true;
+      const itemWords = item.split(/\s+/).filter(Boolean);
+
+      // Nếu cả hai chuỗi đều có từ 2 từ trở lên (họ tên đầy đủ hoặc họ và tên)
+      if (itemWords.length > 1 && tWords.length > 1) {
+        if (item === tClean || item.replace(/\s+/g, '') === tClean.replace(/\s+/g, '')) {
+          return true;
+        }
+        // Khớp họ (từ đầu) và tên (từ cuối)
+        if (itemWords[0] === tWords[0] && itemWords[itemWords.length - 1] === tWords[tWords.length - 1]) {
+          return true;
+        }
+        // Nếu khác họ hoặc khác tên thì KHÔNG khớp
+        continue;
       }
 
-      // 3. Khớp tên gọi (từ cuối cùng - tên riêng của giáo viên như "Long", "Mai", "Cường")
-      const itemLastName = item.split(/\s+/).pop() || '';
-      if (tLastName && itemLastName && tLastName === itemLastName && tLastName.length >= 2) {
-        if (item === itemLastName || item.includes(tLastName)) {
+      // 2. Nếu chuỗi đầu vào chỉ có 1 từ (tên gọi rút gọn như "Dũng", "Bảo", "Mai")
+      if (itemWords.length === 1 && tLastName) {
+        if (item === tLastName) {
           return true;
         }
       }
     }
 
+    return false;
+  }
+
+  /**
+   * Kiểm tra quyền sở hữu Đề thi:
+   * Đề tài khoản nào Tạo thì chỉ xuất hiện ở Tài khoản đó.
+   * Riêng Tài khoản quản trị hiển thị tất cả.
+   */
+  static isTestOwner(test: Test, user: User): boolean {
+    if (!test || !user) return false;
+    if (user.role === 'ADMIN') return true;
+    if (test.createdBy && test.createdBy === user.id) return true;
+    if (test.authorName && this.isTeacherNameMatch(test.authorName, user)) return true;
+    return false;
+  }
+
+  /**
+   * Kiểm tra quyền sở hữu Đợt giao đề:
+   * Tài khoản nào Giao đề thì chỉ hiển thị ở tài khoản đó.
+   * Riêng Tài khoản quản trị hiển thị tất cả.
+   */
+  static isAssignmentOwner(assignment: Assignment, user: User): boolean {
+    if (!assignment || !user) return false;
+    if (user.role === 'ADMIN') return true;
+    if (assignment.assignedBy && assignment.assignedBy === user.id) return true;
+    if (assignment.assignedByName && this.isTeacherNameMatch(assignment.assignedByName, user)) return true;
     return false;
   }
 
@@ -1727,74 +1757,144 @@ export class LMSStorageService {
 
     let targetTitle = 'Tất cả các bài kiểm tra';
     let targetGrade = 6;
-    let targetClassIds: string[] = [];
+    const targetClassIdSet = new Set<string>();
+    const targetClassNameSet = new Set<string>();
 
     let currentAssignment: Assignment | undefined;
     let currentTest: Test | undefined;
+
+    const normalizeName = (s: string) => (s || '').toLowerCase().replace(/^(lớp|lop)\s+/i, '').replace(/[^0-9a-zA-Z]/g, '').trim();
 
     if (params.assignmentId && params.assignmentId !== 'ALL') {
       currentAssignment = allAssignments.find((a) => a.id === params.assignmentId);
       if (currentAssignment) {
         targetTitle = currentAssignment.testTitle;
         targetGrade = currentAssignment.gradeLevel;
-        targetClassIds = [...currentAssignment.classIds];
         currentTest = allTests.find((t) => t.id === currentAssignment?.testId);
+
+        (currentAssignment.classIds || []).forEach((cid) => targetClassIdSet.add(cid));
+        (currentAssignment.classNames || []).forEach((cname) => {
+          targetClassNameSet.add(cname.trim().toLowerCase());
+          targetClassNameSet.add(normalizeName(cname));
+        });
       }
     } else if (params.testId && params.testId !== 'ALL') {
       currentTest = allTests.find((t) => t.id === params.testId);
       if (currentTest) {
         targetTitle = currentTest.title;
         targetGrade = currentTest.gradeLevel;
-        // Lấy tất cả lớp được giao bài của test này
         const matchingAssigns = allAssignments.filter((a) => a.testId === currentTest?.id);
         if (matchingAssigns.length > 0) {
-          targetClassIds = Array.from(new Set(matchingAssigns.flatMap((a) => a.classIds)));
+          matchingAssigns.forEach((a) => {
+            (a.classIds || []).forEach((cid) => targetClassIdSet.add(cid));
+            (a.classNames || []).forEach((cname) => {
+              targetClassNameSet.add(cname.trim().toLowerCase());
+              targetClassNameSet.add(normalizeName(cname));
+            });
+          });
         } else {
-          // Lấy tất cả lớp thuộc khối này
-          targetClassIds = allClasses.filter((c) => c.gradeId === `grade-${currentTest?.gradeLevel}`).map((c) => c.id);
+          allClasses
+            .filter((c) => c.gradeId === `grade-${currentTest?.gradeLevel}`)
+            .forEach((c) => {
+              targetClassIdSet.add(c.id);
+              targetClassNameSet.add(c.name.trim().toLowerCase());
+              targetClassNameSet.add(normalizeName(c.name));
+            });
         }
       }
     }
 
     // Nếu lọc theo 1 lớp cụ thể
     if (params.classId && params.classId !== 'ALL') {
-      targetClassIds = [params.classId];
+      targetClassIdSet.clear();
+      targetClassNameSet.clear();
+      targetClassIdSet.add(params.classId);
+      const foundCls = allClasses.find((c) => c.id === params.classId || normalizeName(c.id) === normalizeName(params.classId!));
+      if (foundCls) {
+        targetClassNameSet.add(foundCls.name.trim().toLowerCase());
+        targetClassNameSet.add(normalizeName(foundCls.name));
+      }
     }
 
-    // Lọc bài nộp liên quan
-    const matchingSubs = allSubmissions.filter((s) => {
-      if (currentAssignment) {
-        if (s.assignmentId !== currentAssignment.id && s.testId !== currentAssignment.testId) return false;
-      } else if (currentTest) {
-        if (s.testId !== currentTest.id) return false;
+    // Mở rộng các classId và className tương ứng từ allClasses
+    allClasses.forEach((c) => {
+      const cNorm = normalizeName(c.name);
+      const cIdNorm = normalizeName(c.id);
+      if (
+        targetClassIdSet.has(c.id) ||
+        targetClassIdSet.has(cIdNorm) ||
+        targetClassNameSet.has(c.name.trim().toLowerCase()) ||
+        targetClassNameSet.has(cNorm)
+      ) {
+        targetClassIdSet.add(c.id);
+        targetClassIdSet.add(cIdNorm);
+        targetClassNameSet.add(c.name.trim().toLowerCase());
+        targetClassNameSet.add(cNorm);
       }
-      if (params.classId && params.classId !== 'ALL') {
-        if (s.classId !== params.classId) return false;
-      } else if (targetClassIds.length > 0) {
-        if (!targetClassIds.includes(s.classId)) return false;
+    });
+
+    const isClassMatched = (classIdOrName?: string) => {
+      if (!classIdOrName) return false;
+      if (targetClassIdSet.size === 0 && targetClassNameSet.size === 0) return true;
+      const raw = classIdOrName.trim().toLowerCase();
+      const norm = normalizeName(classIdOrName);
+      return targetClassIdSet.has(classIdOrName) || targetClassIdSet.has(norm) || targetClassNameSet.has(raw) || targetClassNameSet.has(norm);
+    };
+
+    // 1. Lọc tất cả bài nộp liên quan
+    const matchingSubs = allSubmissions.filter((s) => {
+      // Nếu cùng assignmentId -> CHẮC CHẮN thuộc đợt giao này
+      if (currentAssignment && s.assignmentId === currentAssignment.id) {
+        return true;
+      }
+      // Nếu cùng testId hoặc cùng tên đề thi
+      if (currentAssignment) {
+        const isSameTest =
+          s.testId === currentAssignment.testId ||
+          (s.testTitle && currentAssignment.testTitle && s.testTitle.trim().toLowerCase() === currentAssignment.testTitle.trim().toLowerCase());
+        if (isSameTest) {
+          if (targetClassIdSet.size === 0 && targetClassNameSet.size === 0) return true;
+          return isClassMatched(s.classId) || isClassMatched(s.className);
+        }
+        return false;
+      } else if (currentTest) {
+        const isSameTest =
+          s.testId === currentTest.id ||
+          (s.testTitle && currentTest.title && s.testTitle.trim().toLowerCase() === currentTest.title.trim().toLowerCase());
+        if (isSameTest) {
+          if (targetClassIdSet.size === 0 && targetClassNameSet.size === 0) return true;
+          return isClassMatched(s.classId) || isClassMatched(s.className);
+        }
+        return false;
+      }
+      if (targetClassIdSet.size > 0 || targetClassNameSet.size > 0) {
+        return isClassMatched(s.classId) || isClassMatched(s.className);
       }
       return true;
     });
 
-    // Lấy danh sách học sinh thuộc các lớp được giao (chỉ lấy học sinh còn hoạt động)
+    // 2. Lấy danh sách học sinh thuộc các lớp được giao
     const studentUsers = allUsers.filter((u) => {
       if (u.role !== 'STUDENT' || u.status === 'DELETED') return false;
-      if (targetClassIds.length > 0) {
-        return targetClassIds.includes(u.classId || '');
+      if (targetClassIdSet.size > 0 || targetClassNameSet.size > 0) {
+        if (isClassMatched(u.classId)) return true;
+        const stuClass = allClasses.find((c) => c.id === u.classId);
+        if (stuClass && (isClassMatched(stuClass.id) || isClassMatched(stuClass.name))) {
+          return true;
+        }
+        return false;
       }
-      // Nếu chọn ALL tất cả
       return true;
     });
 
-    // Tìm tên lớp tương ứng
     const getClassName = (cId?: string, fallbackName?: string) => {
       if (fallbackName) return fallbackName;
-      const found = allClasses.find((c) => c.id === cId);
-      return found ? found.name : 'Chưa xếp lớp';
+      const found = allClasses.find((c) => c.id === cId || normalizeName(c.id) === normalizeName(cId || ''));
+      return found ? found.name : (cId ? cId.replace(/^cls-/i, '').replace(/-/g, '/') : 'Chưa xếp lớp');
     };
 
     const getHomeroomTeacher = (cId?: string) => {
-      const found = allClasses.find((c) => c.id === cId);
+      const found = allClasses.find((c) => c.id === cId || normalizeName(c.id) === normalizeName(cId || ''));
       return found?.homeroomTeacherName || 'Chưa phân công';
     };
 
@@ -1824,13 +1924,17 @@ export class LMSStorageService {
     matchingSubs.forEach((sub) => {
       submittedStudentIds.add(sub.studentId);
       if (sub.studentCode) submittedStudentCodes.add(sub.studentCode.toLowerCase());
-      const stu = studentUsers.find((u) => u.id === sub.studentId || (u.studentCode && sub.studentCode && u.studentCode.toLowerCase() === sub.studentCode.toLowerCase()));
+      const stu = allUsers.find(
+        (u) =>
+          u.id === sub.studentId ||
+          (u.studentCode && sub.studentCode && u.studentCode.toLowerCase() === sub.studentCode.toLowerCase())
+      );
       participatedList.push({
         id: sub.studentId,
-        studentCode: sub.studentCode,
-        fullName: sub.studentName,
-        className: sub.className,
-        classId: sub.classId,
+        studentCode: sub.studentCode || stu?.studentCode || 'HS',
+        fullName: sub.studentName || stu?.fullName || 'Học sinh',
+        className: sub.className || getClassName(sub.classId, stu?.classId),
+        classId: sub.classId || stu?.classId || '',
         avatarUrl: stu?.avatarUrl,
         submission: sub
       });
@@ -1888,7 +1992,9 @@ export class LMSStorageService {
     const passRate = participatedCount > 0 ? Math.round((passedCount / participatedCount) * 100) : 0;
     const violationCount = participatedList.filter((p) => p.submission.isViolationAutoSubmitted).length;
 
-    const assignedClassNames = targetClassIds.map((cid) => getClassName(cid));
+    const assignedClassNames = currentAssignment?.classNames?.length
+      ? currentAssignment.classNames
+      : Array.from(targetClassIdSet).map((cid) => getClassName(cid));
 
     return {
       targetTitle,
@@ -1974,6 +2080,6 @@ export class LMSStorageService {
       }
     });
 
-    return [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
+    return '\uFEFF' + [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
   }
 }

@@ -320,12 +320,12 @@ export const MATRIX_PRESETS = [
 ];
 
 export const TestBuilder: React.FC<TestBuilderProps> = ({ currentUser, onTestCreated }) => {
-  const isPrivileged = currentUser.role === 'ADMIN' || currentUser.role === 'PRINCIPAL';
+  const isAdmin = currentUser.role === 'ADMIN';
   const [tests, setTests] = useState<Test[]>(() => LMSStorageService.getTests());
   const [questions, setQuestions] = useState<Question[]>(() => LMSStorageService.getQuestions());
   const [lessons, setLessons] = useState(() => LMSStorageService.getLessons());
 
-  // Bộ lọc phạm vi đề thi và hiển thị
+  // Bộ lọc phạm vi đề thi và hiển thị (chỉ dùng cho tài khoản quản trị)
   const [testScopeFilter, setTestScopeFilter] = useState<'ALL' | 'MINE'>('ALL');
   const [isPullingTests, setIsPullingTests] = useState(false);
   const [isSyncingTests, setIsSyncingTests] = useState(false);
@@ -333,19 +333,15 @@ export const TestBuilder: React.FC<TestBuilderProps> = ({ currentUser, onTestCre
 
   // Hiển thị đề thi: Riêng tài khoản quản trị hiển thị tất cả; Đề tài khoản nào tạo thì chỉ xuất hiện ở tài khoản đó
   const visibleTests = useMemo(() => {
-    if (isPrivileged) {
+    if (isAdmin) {
       if (testScopeFilter === 'MINE') {
-        return tests.filter(
-          (t) => t.createdBy === currentUser.id || LMSStorageService.isTeacherNameMatch(t.authorName, currentUser)
-        );
+        return tests.filter((t) => LMSStorageService.isTestOwner(t, currentUser));
       }
       return tests;
     }
-    // Tài khoản giáo viên: Đề tài khoản nào Tạo thì chỉ xuất hiện ở Tài khoản đó
-    return tests.filter(
-      (t) => t.createdBy === currentUser.id || LMSStorageService.isTeacherNameMatch(t.authorName, currentUser)
-    );
-  }, [tests, isPrivileged, testScopeFilter, currentUser]);
+    // Tài khoản giáo viên: Đề tài khoản nào Tạo thì CHỈ xuất hiện ở Tài khoản đó
+    return tests.filter((t) => LMSStorageService.isTestOwner(t, currentUser));
+  }, [tests, isAdmin, testScopeFilter, currentUser]);
 
   useEffect(() => {
     const unsub = onStorageChange((entity) => {
@@ -1132,7 +1128,7 @@ export const TestBuilder: React.FC<TestBuilderProps> = ({ currentUser, onTestCre
       {/* Scope Filter Tabs */}
       {!isCreating && (
         <div className="flex items-center justify-between gap-3 border-b border-slate-200 pb-3">
-          {isPrivileged ? (
+          {isAdmin ? (
             <div className="flex items-center gap-2">
               <button
                 type="button"
@@ -1154,7 +1150,7 @@ export const TestBuilder: React.FC<TestBuilderProps> = ({ currentUser, onTestCre
                     : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
                 }`}
               >
-                Đề thi do tôi tạo ({tests.filter((t) => t.createdBy === currentUser.id || LMSStorageService.isTeacherNameMatch(t.authorName, currentUser)).length})
+                Đề thi do tôi tạo ({tests.filter((t) => LMSStorageService.isTestOwner(t, currentUser)).length})
               </button>
             </div>
           ) : (
@@ -1162,7 +1158,7 @@ export const TestBuilder: React.FC<TestBuilderProps> = ({ currentUser, onTestCre
               <span className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-200">
                 Đề thi do tôi tạo ({visibleTests.length})
               </span>
-              <span className="text-xs text-slate-400">· Chỉ hiển thị đề do tài khoản của Thầy/Cô tạo</span>
+              <span className="text-xs text-slate-400">· Đề tài khoản nào tạo chỉ xuất hiện ở tài khoản đó (Riêng Quản trị viên xem tất cả)</span>
             </div>
           )}
           <span className="text-xs text-slate-400">

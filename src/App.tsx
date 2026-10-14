@@ -259,7 +259,7 @@ export default function App() {
         case 'results':
           return <ResultsAndGrading currentUser={currentUser} />;
         case 'assignments':
-          return <AssignmentManager currentUser={currentUser} />;
+          return <AssignmentManager currentUser={currentUser} onNavigate={(tab) => setActiveTab(tab as any)} />;
         case 'admin_users':
         case 'admin_import':
           return <UserManagement />;
@@ -301,7 +301,7 @@ export default function App() {
           />
         );
       case 'assignments':
-        return <AssignmentManager currentUser={currentUser} />;
+        return <AssignmentManager currentUser={currentUser} onNavigate={(tab) => setActiveTab(tab as any)} />;
       case 'results':
         return <ResultsAndGrading currentUser={currentUser} />;
       case 'question_analysis':

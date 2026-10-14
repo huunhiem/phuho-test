@@ -64,7 +64,7 @@ export const ResultsAndGrading: React.FC<ResultsAndGradingProps> = ({ currentUse
     return () => unsub();
   }, []);
 
-  const isPrivileged = currentUser.role === 'ADMIN' || currentUser.role === 'PRINCIPAL';
+  const isAdmin = currentUser.role === 'ADMIN';
   const visibleClasses = LMSStorageService.getClassesForTeacher(currentUser);
 
   const uFull = (currentUser.fullName || '').toLowerCase().trim();
@@ -72,12 +72,9 @@ export const ResultsAndGrading: React.FC<ResultsAndGradingProps> = ({ currentUse
   const myClassNames = new Set(visibleClasses.map((c) => c.name));
   const myClassIds = new Set(visibleClasses.map((c) => c.id));
 
-  const visibleAssignments = isPrivileged
+  const visibleAssignments = isAdmin
     ? assignments
-    : assignments.filter((a) => {
-        if (a.assignedBy === currentUser.id) return true;
-        return LMSStorageService.isTeacherNameMatch(a.assignedByName, currentUser);
-      });
+    : assignments.filter((a) => LMSStorageService.isAssignmentOwner(a, currentUser));
 
   // Compute detailed participation report using LMSStorageService
   const report = useMemo(() => {
@@ -224,7 +221,7 @@ export const ResultsAndGrading: React.FC<ResultsAndGradingProps> = ({ currentUse
               }}
               className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-slate-50/50 hover:bg-white text-slate-900 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors"
             >
-              <option value="ALL">📋 {isPrivileged ? 'Tất cả các bài kiểm tra & đợt thi' : 'Tất cả đợt kiểm tra do tôi giao'}</option>
+              <option value="ALL">📋 {isAdmin ? 'Tất cả các bài kiểm tra & đợt thi' : 'Tất cả đợt kiểm tra do tôi giao'}</option>
               {visibleAssignments.map((a) => (
                 <option key={a.id} value={a.id}>
                   {a.testTitle} — Khối {a.gradeLevel} (Lớp: {a.classNames.join(', ')})
@@ -243,7 +240,7 @@ export const ResultsAndGrading: React.FC<ResultsAndGradingProps> = ({ currentUse
               onChange={(e) => setSelectedClassFilter(e.target.value)}
               className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-slate-50/50 hover:bg-white text-slate-900 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors"
             >
-              <option value="ALL">🏫 {isPrivileged ? 'Tất cả các lớp' : 'Tất cả lớp phụ trách'}</option>
+              <option value="ALL">🏫 {isAdmin ? 'Tất cả các lớp' : 'Tất cả lớp phụ trách'}</option>
               {visibleClasses.map((c) => (
                 <option key={c.id} value={c.id}>
                   Lớp {c.name} ({c.studentCount} HS)

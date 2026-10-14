@@ -18,20 +18,26 @@ import {
   Edit2,
   DownloadCloud,
   UploadCloud,
-  Loader2
+  Loader2,
+  FileText,
+  ExternalLink,
+  Check,
+  X
 } from 'lucide-react';
-import { Assignment, Test, User, ClassRoom } from '../../types';
+import { Assignment, Test, User, ClassRoom, Submission, Question } from '../../types';
 import { LMSStorageService, safeFormatDateTimeForInput } from '../../services/storage';
 import { GoogleSheetsService, getSavedSheetId, getGoogleAccessToken, getAppsScriptUrl } from '../../services/googleSheetsService';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 import { onStorageChange } from '../../services/storageEvents';
+import { GoogleDriveService } from '../../services/googleDriveService';
 
 interface AssignmentManagerProps {
   currentUser: User;
+  onNavigate?: (tab: string, extra?: any) => void;
 }
 
-export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUser }) => {
-  const isPrivileged = currentUser.role === 'ADMIN' || currentUser.role === 'PRINCIPAL';
+export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUser, onNavigate }) => {
+  const isAdmin = currentUser.role === 'ADMIN';
   const [, setTick] = useState(0);
 
   useEffect(() => {
@@ -46,15 +52,14 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
   const allClasses = LMSStorageService.getClasses();
   const classes = LMSStorageService.getClassesForTeacher(currentUser);
   const assignableClasses = classes.length > 0 ? classes : allClasses;
+  const questions = LMSStorageService.getQuestions();
 
   const allTests = LMSStorageService.getTests();
   // Riêng Tài khoản quản trị hiển thị tất cả đề; Giáo viên chỉ thấy và giao đề do chính tài khoản mình tạo
   const assignableTests = useMemo(() => {
-    if (isPrivileged) return allTests;
-    return allTests.filter(
-      (t) => t.createdBy === currentUser.id || LMSStorageService.isTeacherNameMatch(t.authorName, currentUser)
-    );
-  }, [allTests, isPrivileged, currentUser]);
+    if (isAdmin) return allTests;
+    return allTests.filter((t) => LMSStorageService.isTestOwner(t, currentUser));
+  }, [allTests, isAdmin, currentUser]);
 
   const [assignments, setAssignments] = useState<Assignment[]>(() => LMSStorageService.getAssignments());
   const [assignScopeFilter, setAssignScopeFilter] = useState<'ALL' | 'MINE'>('ALL');
@@ -65,20 +70,18 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
 
   // Hiển thị đợt giao bài: Riêng tài khoản quản trị hiển thị tất cả; Tài khoản nào giao đề thì chỉ hiển thị ở tài khoản đó
   const visibleAssignments = useMemo(() => {
-    if (isPrivileged) {
+    if (isAdmin) {
       if (assignScopeFilter === 'MINE') {
-        return assignments.filter(
-          (a) => a.assignedBy === currentUser.id || LMSStorageService.isTeacherNameMatch(a.assignedByName, currentUser)
-        );
+        return assignments.filter((a) => LMSStorageService.isAssignmentOwner(a, currentUser));
       }
       return assignments;
     }
     // Giáo viên thông thường: Đợt giao của tài khoản nào thì CHỈ hiển thị ở tài khoản đó
-    return assignments.filter((a) => {
-      if (a.assignedBy === currentUser.id) return true;
-      return LMSStorageService.isTeacherNameMatch(a.assignedByName, currentUser);
-    });
-  }, [assignments, isPrivileged, assignScopeFilter, currentUser]);
+    return assignments.filter((a) => LMSStorageService.isAssignmentOwner(a, currentUser));
+  }, [assignments, isAdmin, assignScopeFilter, currentUser]);
+
+  // Modal chi tiết bài làm học sinh
+  const [selectedSubDetail, setSelectedSubDetail] = useState<Submission | null>(null);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingAssign, setEditingAssign] = useState<Assignment | null>(null);
@@ -163,7 +166,7 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
   };
 
   const handleOpenAdd = () => {
-    if (!isPrivileged && assignableTests.length === 0) {
+    if (!isAdmin && assignableTests.length === 0) {
       setToastMessage('⚠️ Thầy/Cô chưa có đề kiểm tra nào do mình tạo. Vui lòng vào mục "Tạo đề kiểm tra" để tạo đề trước khi giao bài!');
       setTimeout(() => setToastMessage(null), 5000);
       return;
@@ -387,7 +390,7 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
 
       {/* Scope Filter Tabs */}
       <div className="flex items-center justify-between gap-3 border-b border-slate-200 pb-3">
-        {isPrivileged ? (
+        {isAdmin ? (
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -409,7 +412,7 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
                   : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
               }`}
             >
-              Đợt giao do tôi tạo ({assignments.filter((a) => a.assignedBy === currentUser.id || LMSStorageService.isTeacherNameMatch(a.assignedByName, currentUser)).length})
+              Đợt giao do tôi tạo ({assignments.filter((a) => LMSStorageService.isAssignmentOwner(a, currentUser)).length})
             </button>
           </div>
         ) : (
@@ -417,7 +420,7 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
             <span className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-200">
               Đợt giao bài do tôi tạo ({visibleAssignments.length})
             </span>
-            <span className="text-xs text-slate-400">· Chỉ hiển thị bài do tài khoản của Thầy/Cô giao</span>
+            <span className="text-xs text-slate-400">· Tài khoản nào giao đề chỉ hiển thị ở tài khoản đó (Riêng Quản trị viên xem tất cả)</span>
           </div>
         )}
         <span className="text-xs text-slate-400">
@@ -618,6 +621,20 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
+                  {onNavigate && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setViewResultAssign(null);
+                        onNavigate('results');
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 cursor-pointer"
+                      title="Mở toàn màn hình chuyên sâu trong mục Kết quả & Chấm bài"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5 text-indigo-600" />
+                      <span className="hidden sm:inline">Trang Chấm bài chi tiết</span>
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={handleModalExport}
@@ -726,12 +743,13 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
                       <th className="px-3 py-2.5 text-center">Đúng/Tổng</th>
                       <th className="px-3.5 py-2.5 text-center">Điểm số</th>
                       <th className="px-3.5 py-2.5">Thời gian nộp</th>
+                      <th className="px-3.5 py-2.5 text-center">Chi tiết bài thi</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {list.length === 0 ? (
                       <tr>
-                        <td colSpan={8} className="px-4 py-8 text-center text-slate-400">
+                        <td colSpan={9} className="px-4 py-8 text-center text-slate-400">
                           Không có học sinh nào phù hợp.
                         </td>
                       </tr>
@@ -784,6 +802,21 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
                             <td className="px-3.5 py-2.5 text-slate-500 text-[11px]">
                               {sub ? new Date(sub.submittedAt).toLocaleString('vi-VN') : 'Chưa nộp bài'}
                             </td>
+                            <td className="px-3.5 py-2.5 text-center">
+                              {hasSub && sub ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedSubDetail(sub)}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 transition-colors cursor-pointer shadow-2xs"
+                                  title="Xem toàn bộ câu hỏi và đáp án đã làm của học sinh"
+                                >
+                                  <Eye className="w-3.5 h-3.5 text-indigo-600" />
+                                  <span>Xem bài làm</span>
+                                </button>
+                              ) : (
+                                <span className="text-slate-400 text-[11px] italic">Chưa nộp</span>
+                              )}
+                            </td>
                           </tr>
                         );
                       })
@@ -796,7 +829,7 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
                 <button
                   type="button"
                   onClick={() => setViewResultAssign(null)}
-                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200"
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 cursor-pointer"
                 >
                   Đóng
                 </button>
@@ -805,6 +838,195 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
           </div>
         );
       })()}
+
+      {/* Modal Xem chi tiết bài làm của học sinh */}
+      {selectedSubDetail && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center bg-slate-900/70 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-3xl p-6 max-h-[92vh] overflow-y-auto space-y-4 animate-in fade-in zoom-in-95">
+            <div className="flex items-start justify-between border-b border-slate-200 pb-3">
+              <div>
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-indigo-50 border border-indigo-200 text-indigo-700 text-[11px] font-semibold mb-1">
+                  <FileText className="w-3.5 h-3.5" />
+                  <span>Chi tiết bài làm kiểm tra</span>
+                </div>
+                <h2 className="text-lg font-bold text-slate-900">{selectedSubDetail.studentName}</h2>
+                <div className="text-xs text-slate-500 mt-0.5 flex flex-wrap gap-2">
+                  <span>Mã HS: <strong className="font-mono text-slate-700">{selectedSubDetail.studentCode}</strong></span>
+                  <span>·</span>
+                  <span>Lớp: <strong>{selectedSubDetail.className}</strong></span>
+                  <span>·</span>
+                  <span>Đề: <strong>{selectedSubDetail.testTitle}</strong></span>
+                  <span>·</span>
+                  <span>Mã đề: <strong>{selectedSubDetail.variantCode || '101'}</strong></span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedSubDetail(null)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 text-sm cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Thống kê bài thi */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="p-3 rounded-xl bg-indigo-50 border border-indigo-200">
+                <div className="text-[11px] font-semibold text-indigo-700">Điểm số đạt được</div>
+                <div className="text-2xl font-black text-indigo-700 mt-0.5">
+                  {selectedSubDetail.score.toFixed(1)} <span className="text-xs font-normal">/ 10</span>
+                </div>
+              </div>
+              <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200">
+                <div className="text-[11px] font-semibold text-emerald-700">Số câu đúng</div>
+                <div className="text-2xl font-black text-emerald-700 mt-0.5">
+                  {selectedSubDetail.correctCount} / {selectedSubDetail.totalQuestions}
+                </div>
+              </div>
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
+                <div className="text-[11px] font-semibold text-slate-600">Thời gian làm bài</div>
+                <div className="text-lg font-bold text-slate-800 mt-1">
+                  {Math.round(selectedSubDetail.timeSpentSeconds / 60)} phút {selectedSubDetail.timeSpentSeconds % 60}s
+                </div>
+              </div>
+              <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
+                <div className="text-[11px] font-semibold text-slate-600">Thời gian nộp bài</div>
+                <div className="text-xs font-medium text-slate-700 mt-1.5">
+                  {new Date(selectedSubDetail.submittedAt).toLocaleString('vi-VN')}
+                </div>
+              </div>
+            </div>
+
+            {/* Cảnh báo vi phạm nếu có */}
+            {selectedSubDetail.isViolationAutoSubmitted && (
+              <div className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-xs flex items-start gap-2.5">
+                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                <div className="space-y-0.5">
+                  <div className="font-bold text-rose-800">
+                    Cảnh báo vi phạm nội quy: Rời khỏi màn hình làm bài (Tự động thu hồi)
+                  </div>
+                  <div className="text-rose-700 font-medium">
+                    Lý do: {selectedSubDetail.violationReason || 'Phát hiện chuyển tab hoặc rời ứng dụng trong lúc thi.'}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Chi tiết từng câu hỏi trong bài làm */}
+            <div className="space-y-3.5 pt-1">
+              <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wide">
+                Nội dung các câu hỏi và câu trả lời của học sinh:
+              </h3>
+
+              {Object.keys(selectedSubDetail.answers || {}).length === 0 ? (
+                <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 text-center text-xs text-slate-400">
+                  Không có dữ liệu chi tiết từng câu hỏi cho bài nộp này.
+                </div>
+              ) : (
+                Object.entries(selectedSubDetail.answers || {}).map(([qId, ans], idx) => {
+                  const q = questions.find((item) => item.id === qId);
+
+                  return (
+                    <div key={qId} className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="font-bold text-slate-900 text-xs">
+                          Câu {idx + 1}: {q?.content || `Câu hỏi #${qId}`}
+                        </span>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {ans.isCorrect ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                              <Check className="w-3 h-3" /> Đúng (+{ans.pointsEarned}đ)
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold bg-rose-100 text-rose-800 border border-rose-200">
+                              <X className="w-3 h-3" /> Sai (0đ)
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {(q?.imageUrl || q?.imageDriveUrl) && (
+                        <div className="my-1.5 p-2 bg-white rounded-lg border border-slate-200 inline-block">
+                          <img
+                            src={GoogleDriveService.getDriveDirectImageUrl(q.imageUrl || q.imageDriveUrl || '')}
+                            alt="Ảnh câu hỏi"
+                            className="max-h-36 max-w-full rounded object-contain"
+                          />
+                        </div>
+                      )}
+
+                      {/* Các lựa chọn trắc nghiệm */}
+                      {q?.options && q.options.length > 0 && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-1 text-xs">
+                          {q.options.map((opt) => {
+                            const isSelected = ans.selectedOptionId === opt.id || ans.selectedOptionIds?.includes(opt.id);
+                            const isCorrect = opt.isCorrect;
+
+                            let optClass = 'bg-white border-slate-200 text-slate-700';
+                            if (isSelected && isCorrect) {
+                              optClass = 'bg-emerald-50 border-emerald-300 text-emerald-900 font-semibold';
+                            } else if (isSelected && !isCorrect) {
+                              optClass = 'bg-rose-50 border-rose-300 text-rose-900 font-semibold';
+                            } else if (isCorrect) {
+                              optClass = 'bg-emerald-50/60 border-emerald-200 text-emerald-800 font-medium';
+                            }
+
+                            return (
+                              <div
+                                key={opt.id}
+                                className={`p-2 rounded-lg border flex items-center justify-between gap-2 ${optClass}`}
+                              >
+                                <span>{opt.text}</span>
+                                <div className="flex items-center gap-1 shrink-0">
+                                  {isSelected && (
+                                    <span className="text-[10px] px-1.5 py-0.2 rounded bg-indigo-100 text-indigo-700 font-bold">
+                                      HS chọn
+                                    </span>
+                                  )}
+                                  {isCorrect && (
+                                    <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800 font-bold">
+                                      Đáp án đúng
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {/* Tự luận hoặc điền từ */}
+                      {ans.textAnswer && (
+                        <div className="p-2.5 rounded-lg bg-white border border-slate-200 text-xs">
+                          <span className="font-semibold text-slate-500">Bài làm học sinh:</span>
+                          <div className="mt-1 font-mono text-slate-900 whitespace-pre-wrap">{ans.textAnswer}</div>
+                        </div>
+                      )}
+
+                      {/* Lời giải chi tiết */}
+                      {q?.explanation && (
+                        <div className="p-2.5 rounded-lg bg-indigo-50/50 border border-indigo-100 text-[11px] text-indigo-900">
+                          <strong>Lời giải chi tiết:</strong> {q.explanation}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div className="flex justify-end pt-2 border-t border-slate-200">
+              <button
+                type="button"
+                onClick={() => setSelectedSubDetail(null)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 cursor-pointer"
+              >
+                Đóng
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal Add Assignment */}
       {isModalOpen && (
@@ -830,7 +1052,7 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
                   className="w-full px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 font-medium text-slate-800"
                 >
                   {assignableTests.length === 0 ? (
-                    <option value="">Chưa có đề thi nào trong hệ thống</option>
+                    <option value="">Thầy/Cô chưa có đề thi nào (Vui lòng tạo đề trước)</option>
                   ) : (
                     assignableTests.map((t) => (
                       <option key={t.id} value={t.id}>
@@ -839,6 +1061,26 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
                     ))
                   )}
                 </select>
+                {assignableTests.length === 0 && (
+                  <div className="mt-2 p-2.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-xs space-y-1.5">
+                    <p className="font-semibold">
+                      Theo phân quyền: Đề tài khoản nào Tạo thì chỉ xuất hiện ở Tài khoản đó (Riêng Quản trị viên xem tất cả).
+                    </p>
+                    {onNavigate && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsModalOpen(false);
+                          onNavigate('test_builder');
+                        }}
+                        className="px-2.5 py-1 rounded bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-[11px] inline-flex items-center gap-1 cursor-pointer"
+                      >
+                        <Plus className="w-3 h-3" />
+                        <span>Chuyển sang mục Tạo đề thi</span>
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div>

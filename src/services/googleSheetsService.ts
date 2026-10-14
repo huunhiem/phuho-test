@@ -2059,6 +2059,7 @@ export class GoogleSheetsService {
 
     const dataRows = headerRowIdx >= 0 ? rows.slice(headerRowIdx + 1) : rows;
     const allQuestions = LMSStorageService.getQuestions();
+    const allUsers = LMSStorageService.getUsers();
     const currentUser = LMSStorageService.getCurrentUser();
     const existingTests = LMSStorageService.getTests();
     const existingMap = new Map(existingTests.map((t) => [t.id, t]));
@@ -2101,7 +2102,10 @@ export class GoogleSheetsService {
       const duration = rawDuration ? (parseInt(rawDuration.replace(/[^0-9]/g, ''), 10) || 45) : (prev?.durationMinutes || 45);
       const questionCount = rawCount ? (parseInt(rawCount.replace(/[^0-9]/g, ''), 10) || 20) : (prev?.totalQuestions || 20);
       const variantCode = rawVariant || prev?.variants?.[0]?.code || '101';
-      const author = rawAuthor || prev?.authorName || currentUser?.fullName || 'Giáo viên Tin học';
+      
+      const matchedAuthor = rawAuthor ? allUsers.find((u) => LMSStorageService.isTeacherNameMatch(rawAuthor, u)) : undefined;
+      const author = matchedAuthor?.fullName || rawAuthor || prev?.authorName || currentUser?.fullName || 'Giáo viên Tin học';
+      const createdBy = prev?.createdBy || matchedAuthor?.id || (currentUser?.role === 'ADMIN' ? 'user-admin-01' : currentUser?.id || 'user-admin-01');
       const createdAt = rawCreatedAt || prev?.createdAt || new Date().toISOString().split('T')[0];
 
       let questionIds: string[] = [];
@@ -2121,7 +2125,7 @@ export class GoogleSheetsService {
         totalPoints: prev?.totalPoints || 10,
         questionIds,
         variants: [{ code: variantCode, questionIds }],
-        createdBy: prev?.createdBy || currentUser?.id || 'user-admin-01',
+        createdBy,
         authorName: author,
         createdAt,
         status: rawStatus.toUpperCase() === 'ARCHIVED' ? 'READY' : 'READY',
@@ -2239,6 +2243,7 @@ export class GoogleSheetsService {
     const dataRows = headerRowIdx >= 0 ? rows.slice(headerRowIdx + 1) : rows;
     const classes = LMSStorageService.getClasses();
     const tests = LMSStorageService.getTests();
+    const allUsers = LMSStorageService.getUsers();
     const currentUser = LMSStorageService.getCurrentUser();
     const existingAssigns = LMSStorageService.getAssignments();
     const existingMap = new Map(existingAssigns.map((a) => [a.id, a]));
@@ -2291,6 +2296,10 @@ export class GoogleSheetsService {
         return found ? found.id : `cls-${cn.replace(/[^a-zA-Z0-9]/g, '-')}`;
       });
 
+      const matchedAssigner = rawAuthor ? allUsers.find((u) => LMSStorageService.isTeacherNameMatch(rawAuthor, u)) : undefined;
+      const assignedBy = prev?.assignedBy || matchedAssigner?.id || (currentUser?.role === 'ADMIN' ? 'user-admin-01' : currentUser?.id || 'user-admin-01');
+      const assignedByName = matchedAssigner?.fullName || rawAuthor || prev?.assignedByName || currentUser?.fullName || 'Giáo viên';
+
       imported.push({
         id,
         testId,
@@ -2303,8 +2312,8 @@ export class GoogleSheetsService {
         password: rawPassword === 'Không có' ? undefined : (rawPassword || undefined),
         allowReviewAfterSubmit: rawReview.toLowerCase() !== 'không',
         shuffleQuestions: rawShuffle.toLowerCase() !== 'không',
-        assignedBy: prev?.assignedBy || currentUser?.id || 'user-admin-01',
-        assignedByName: rawAuthor || prev?.assignedByName || currentUser?.fullName || 'Giáo viên',
+        assignedBy,
+        assignedByName,
         createdAt: rawCreatedAt || prev?.createdAt || new Date().toISOString().split('T')[0],
         status: rawStatus.toUpperCase() === 'CLOSED' ? 'CLOSED' : 'ACTIVE'
       });
