@@ -22,12 +22,14 @@ import {
   FileText,
   ExternalLink,
   Check,
-  X
+  X,
+  HelpCircle
 } from 'lucide-react';
 import { Assignment, Test, User, ClassRoom, Submission, Question } from '../../types';
 import { LMSStorageService, safeFormatDateTimeForInput } from '../../services/storage';
 import { GoogleSheetsService, getSavedSheetId, getGoogleAccessToken, getAppsScriptUrl } from '../../services/googleSheetsService';
 import { ConfirmDialog } from '../common/ConfirmDialog';
+import { AppsScriptUpdateNoticeModal } from '../common/AppsScriptUpdateNoticeModal';
 import { onStorageChange } from '../../services/storageEvents';
 import { GoogleDriveService } from '../../services/googleDriveService';
 
@@ -145,6 +147,8 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
     }
   };
 
+  const [showScriptUpdateModal, setShowScriptUpdateModal] = useState(false);
+
   // Đồng bộ toàn bộ đợt giao đề lên Google Sheet (sheet GiaoDe)
   const handlePushAssignmentsToGoogleSheet = async () => {
     setIsSyncingAssignments(true);
@@ -157,6 +161,9 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
       } else {
         setToastMessage(`⚠️ ${res.message}`);
         setSyncAssignMessage(`⚠️ ${res.message}`);
+        if (res.needScriptUpdate) {
+          setShowScriptUpdateModal(true);
+        }
       }
     } catch (err: any) {
       setSyncAssignMessage(`⚠️ Lỗi đồng bộ: ${err.message || String(err)}`);
@@ -238,11 +245,15 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
         action: 'saveAssignment',
         ...updatedAssignment
       }).catch((e) => console.warn('Lỗi ghi saveAssignment Apps Script:', e));
-      GoogleSheetsService.pushAssignmentsToGoogleSheet().catch(() => {});
+      GoogleSheetsService.pushAssignmentsToGoogleSheet().then((res) => {
+        if (!res.success && res.needScriptUpdate) {
+          setSyncAssignMessage('⚠️ Google Apps Script trên Google Sheet cần cập nhật phiên bản mới để lưu đợt giao đề sang các thiết bị khác.');
+        }
+      }).catch(() => {});
       refreshAssignments();
       setIsModalOpen(false);
       setEditingAssign(null);
-      setToastMessage('✓ Đã cập nhật đợt giao đề thành công và tự động đồng bộ vào Google Sheet (sheet GiaoDe)!');
+      setToastMessage('✓ Đã cập nhật đợt giao đề thành công!');
       setTimeout(() => setToastMessage(null), 4000);
       return;
     }
@@ -271,10 +282,14 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
       action: 'saveAssignment',
       ...newAssignment
     }).catch((e) => console.warn('Lỗi ghi saveAssignment Apps Script:', e));
-    GoogleSheetsService.pushAssignmentsToGoogleSheet().catch(() => {});
+    GoogleSheetsService.pushAssignmentsToGoogleSheet().then((res) => {
+      if (!res.success && res.needScriptUpdate) {
+        setSyncAssignMessage('⚠️ Google Apps Script trên Google Sheet chưa được cập nhật phiên bản mới. Đợt giao đề hiện chỉ lưu trên trình duyệt này!');
+      }
+    }).catch(() => {});
     refreshAssignments();
     setIsModalOpen(false);
-    setToastMessage('✓ Đã giao bài kiểm tra thành công và tự động đồng bộ vào Google Sheet (sheet GiaoDe)!');
+    setToastMessage('✓ Đã giao bài kiểm tra thành công!');
     setTimeout(() => setToastMessage(null), 4000);
   };
 
@@ -350,6 +365,16 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
 
           <button
             type="button"
+            onClick={() => setShowScriptUpdateModal(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg transition-colors cursor-pointer"
+            title="Hướng dẫn đồng bộ Đợt giao đề giữa các trình duyệt và cập nhật Google Apps Script"
+          >
+            <HelpCircle className="w-3.5 h-3.5 text-slate-500" />
+            <span>Hướng dẫn đồng bộ</span>
+          </button>
+
+          <button
+            type="button"
             onClick={handleOpenAdd}
             className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-xs transition-colors self-start cursor-pointer"
           >
@@ -375,6 +400,15 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
               <CheckCircle2 className="w-4 h-4 text-indigo-600 shrink-0" />
             )}
             <span>{syncAssignMessage}</span>
+            {(syncAssignMessage.startsWith('⚠️') || syncAssignMessage.startsWith('Lỗi')) && (
+              <button
+                type="button"
+                onClick={() => setShowScriptUpdateModal(true)}
+                className="underline font-bold text-amber-900 hover:text-amber-950 ml-1 cursor-pointer"
+              >
+                (Xem cách xử lý)
+              </button>
+            )}
           </div>
           <span
             className={`font-semibold text-[11px] px-2 py-0.5 rounded ${
@@ -1203,6 +1237,14 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
         isDanger={true}
         onConfirm={confirmDeleteAssignment}
         onCancel={() => setDeleteAssignId(null)}
+      />
+
+      {/* Cập nhật Apps Script & Hướng dẫn đồng bộ sang máy khác */}
+      <AppsScriptUpdateNoticeModal
+        isOpen={showScriptUpdateModal}
+        onClose={() => setShowScriptUpdateModal(false)}
+        title="Đồng bộ Đợt giao đề giữa các trình duyệt & thiết bị"
+        context="assignment"
       />
     </div>
   );

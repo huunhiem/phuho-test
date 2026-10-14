@@ -51,6 +51,7 @@ import { GoogleDriveService } from '../../services/googleDriveService';
 import { GoogleSheetsService, getSavedSheetId, getGoogleAccessToken, getAppsScriptUrl } from '../../services/googleSheetsService';
 import { onStorageChange } from '../../services/storageEvents';
 import { ConfirmDialog } from '../common/ConfirmDialog';
+import { AppsScriptUpdateNoticeModal } from '../common/AppsScriptUpdateNoticeModal';
 
 interface TestBuilderProps {
   currentUser: User;
@@ -396,6 +397,8 @@ export const TestBuilder: React.FC<TestBuilderProps> = ({ currentUser, onTestCre
     }
   };
 
+  const [showScriptUpdateModal, setShowScriptUpdateModal] = useState(false);
+
   // Đồng bộ toàn bộ đề thi lên Google Sheet (sheet DeThi)
   const handlePushTestsToGoogleSheet = async () => {
     setIsSyncingTests(true);
@@ -408,6 +411,9 @@ export const TestBuilder: React.FC<TestBuilderProps> = ({ currentUser, onTestCre
       } else {
         setToastMessage(`⚠️ ${res.message}`);
         setSyncTestMessage(`⚠️ ${res.message}`);
+        if (res.needScriptUpdate) {
+          setShowScriptUpdateModal(true);
+        }
       }
     } catch (err: any) {
       setSyncTestMessage(`⚠️ Lỗi đồng bộ: ${err.message || String(err)}`);
@@ -914,10 +920,15 @@ export const TestBuilder: React.FC<TestBuilderProps> = ({ currentUser, onTestCre
         action: 'saveTest',
         ...updatedTest
       }).catch((e) => console.warn('Lỗi ghi saveTest Apps Script:', e));
+      GoogleSheetsService.pushTestsToGoogleSheet().then((res) => {
+        if (!res.success && res.needScriptUpdate) {
+          setSyncTestMessage('⚠️ Google Apps Script trên Google Sheet cần cập nhật phiên bản mới để lưu đề thi sang các thiết bị khác.');
+        }
+      }).catch(() => {});
       refreshTests();
       setIsCreating(false);
       setEditingTest(null);
-      setToastMessage('✓ Đã cập nhật đề thi thành công và tự động đồng bộ vào Google Sheet (sheet DeThi)!');
+      setToastMessage('✓ Đã cập nhật đề thi thành công!');
       setTimeout(() => setToastMessage(null), 4000);
       return;
     }
@@ -955,9 +966,14 @@ export const TestBuilder: React.FC<TestBuilderProps> = ({ currentUser, onTestCre
       action: 'saveTest',
       ...newTest
     }).catch((e) => console.warn('Lỗi ghi saveTest Apps Script:', e));
+    GoogleSheetsService.pushTestsToGoogleSheet().then((res) => {
+      if (!res.success && res.needScriptUpdate) {
+        setSyncTestMessage('⚠️ Google Apps Script trên Google Sheet chưa được cập nhật phiên bản mới. Đề thi hiện chỉ lưu trên trình duyệt này!');
+      }
+    }).catch(() => {});
     refreshTests();
     setIsCreating(false);
-    setToastMessage('✓ Đã tạo đề thi mới thành công và tự động đồng bộ vào Google Sheet (sheet DeThi)!');
+    setToastMessage('✓ Đã tạo đề thi mới thành công!');
     setTimeout(() => setToastMessage(null), 4000);
     if (onTestCreated) onTestCreated(newTest);
   };
@@ -1079,6 +1095,16 @@ export const TestBuilder: React.FC<TestBuilderProps> = ({ currentUser, onTestCre
 
             <button
               type="button"
+              onClick={() => setShowScriptUpdateModal(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg transition-colors cursor-pointer"
+              title="Hướng dẫn đồng bộ Đề thi giữa các trình duyệt và cập nhật Google Apps Script"
+            >
+              <HelpCircle className="w-3.5 h-3.5 text-slate-500" />
+              <span>Hướng dẫn đồng bộ</span>
+            </button>
+
+            <button
+              type="button"
               onClick={() => {
                 setEditingTest(null);
                 setIsCreating(true);
@@ -1112,6 +1138,15 @@ export const TestBuilder: React.FC<TestBuilderProps> = ({ currentUser, onTestCre
               <CheckCircle2 className="w-4 h-4 text-indigo-600 shrink-0" />
             )}
             <span>{syncTestMessage}</span>
+            {(syncTestMessage.startsWith('⚠️') || syncTestMessage.startsWith('Lỗi')) && (
+              <button
+                type="button"
+                onClick={() => setShowScriptUpdateModal(true)}
+                className="underline font-bold text-amber-900 hover:text-amber-950 ml-1 cursor-pointer"
+              >
+                (Xem cách xử lý)
+              </button>
+            )}
           </div>
           <span
             className={`font-semibold text-[11px] px-2 py-0.5 rounded ${
@@ -2745,6 +2780,14 @@ export const TestBuilder: React.FC<TestBuilderProps> = ({ currentUser, onTestCre
         isDanger={true}
         onConfirm={confirmDeleteTest}
         onCancel={() => setDeleteTestId(null)}
+      />
+
+      {/* Cập nhật Apps Script & Hướng dẫn đồng bộ sang máy khác */}
+      <AppsScriptUpdateNoticeModal
+        isOpen={showScriptUpdateModal}
+        onClose={() => setShowScriptUpdateModal(false)}
+        title="Đồng bộ Đề thi giữa các trình duyệt & thiết bị"
+        context="test"
       />
     </div>
   );

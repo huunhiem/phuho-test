@@ -1720,6 +1720,29 @@ export class LMSStorageService {
     return JSON.stringify(data, null, 2);
   }
 
+  // Import DB from JSON backup
+  static importDatabaseJSON(jsonStrOrObj: string | any): boolean {
+    try {
+      const data = typeof jsonStrOrObj === 'string' ? JSON.parse(jsonStrOrObj) : jsonStrOrObj;
+      if (!data) return false;
+      if (data.school) setStored(STORAGE_KEYS.SCHOOL, data.school);
+      if (Array.isArray(data.academicYears)) setStored(STORAGE_KEYS.ACADEMIC_YEARS, data.academicYears);
+      if (Array.isArray(data.grades)) setStored(STORAGE_KEYS.GRADES, data.grades);
+      if (Array.isArray(data.classes)) setStored(STORAGE_KEYS.CLASSES, data.classes);
+      if (Array.isArray(data.users)) setStored(STORAGE_KEYS.USERS, data.users);
+      if (Array.isArray(data.topics)) setStored(STORAGE_KEYS.TOPICS, data.topics);
+      if (Array.isArray(data.questions)) setStored(STORAGE_KEYS.QUESTIONS, data.questions);
+      if (Array.isArray(data.tests)) setStored(STORAGE_KEYS.TESTS, data.tests);
+      if (Array.isArray(data.assignments)) setStored(STORAGE_KEYS.ASSIGNMENTS, data.assignments);
+      if (Array.isArray(data.submissions)) setStored(STORAGE_KEYS.SUBMISSIONS, data.submissions);
+      notifyChange('all');
+      return true;
+    } catch (e) {
+      console.error('Error importing database JSON:', e);
+      return false;
+    }
+  }
+
   // Export Results to CSV/Excel string
   static exportSubmissionsToCSV(assignmentId?: string): string {
     const submissions = this.getSubmissions().filter((s) => !assignmentId || s.assignmentId === assignmentId);

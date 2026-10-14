@@ -2400,10 +2400,75 @@ export class GoogleSheetsService {
     }
   }
 
+  private static capsCache: {
+    checked: boolean;
+    supportsTests: boolean;
+    supportsAssignments: boolean;
+    supportsSaveQuestion: boolean;
+  } | null = null;
+
+  static async checkAppsScriptCapabilities(forceRefresh: boolean = false): Promise<{
+    supportsTests: boolean;
+    supportsAssignments: boolean;
+    supportsSaveQuestion: boolean;
+  }> {
+    if (!forceRefresh && this.capsCache?.checked) {
+      return this.capsCache;
+    }
+
+    const scriptUrl = getAppsScriptUrl();
+    if (!scriptUrl) {
+      return { supportsTests: false, supportsAssignments: false, supportsSaveQuestion: false };
+    }
+
+    let supportsTests = false;
+    let supportsAssignments = false;
+    let supportsSaveQuestion = false;
+
+    try {
+      const res = await fetch(`${scriptUrl}?action=getTests`);
+      if (res.ok) {
+        const text = await res.text();
+        if (text.startsWith('[') && !text.includes('Action không hợp lệ')) {
+          supportsTests = true;
+        }
+      }
+    } catch {}
+
+    try {
+      const res = await fetch(`${scriptUrl}?action=getAssignments`);
+      if (res.ok) {
+        const text = await res.text();
+        if (text.startsWith('[') && !text.includes('Action không hợp lệ')) {
+          supportsAssignments = true;
+        }
+      }
+    } catch {}
+
+    try {
+      const res = await fetch(`${scriptUrl}?action=getQuestions`);
+      if (res.ok) {
+        const text = await res.text();
+        if (text.startsWith('[')) {
+          supportsSaveQuestion = true;
+        }
+      }
+    } catch {}
+
+    this.capsCache = {
+      checked: true,
+      supportsTests,
+      supportsAssignments,
+      supportsSaveQuestion
+    };
+
+    return this.capsCache;
+  }
+
   /**
    * Đồng bộ / Ghi đè trực tiếp danh sách Đề thi lên Google Sheet (hỗ trợ cả OAuth và Apps Script)
    */
-  static async pushTestsToGoogleSheet(): Promise<{ success: boolean; message: string }> {
+  static async pushTestsToGoogleSheet(): Promise<{ success: boolean; message: string; needScriptUpdate?: boolean }> {
     const sheetId = getSavedSheetId();
     const token = getGoogleAccessToken();
     if (sheetId && token) {
@@ -2416,6 +2481,15 @@ export class GoogleSheetsService {
     }
     const scriptUrl = getAppsScriptUrl();
     if (scriptUrl) {
+      const caps = await this.checkAppsScriptCapabilities();
+      if (!caps.supportsTests) {
+        return {
+          success: false,
+          needScriptUpdate: true,
+          message: 'Google Apps Script trên Google Sheet chưa được triển khai phiên bản mới để hỗ trợ lưu Đề thi (DeThi). Đề thi hiện chỉ lưu tạm trên trình duyệt này! Vui lòng cập nhật Apps Script hoặc dùng nút "Xuất file dữ liệu" để chuyển sang máy khác.'
+        };
+      }
+
       const rows = this.buildDeThiRows();
       const res = await this.postToAppsScript({
         action: 'batchPushAllData',
@@ -2426,32 +2500,11 @@ export class GoogleSheetsService {
         return { success: true, message: 'Đã lưu danh sách Đề thi lên sheet DeThi (qua Apps Script) thành công!' };
       }
 
-      // Tự động chuyển sang fallback gọi action 'saveTest' cho từng đề thi nếu script chưa có batchPushAllData
-      if (res.unsupportedAction || (res.error && res.error.includes('Unsupported action'))) {
-        try {
-          const tests = LMSStorageService.getTests();
-          for (const t of tests) {
-            await this.postToAppsScript({
-              action: 'saveTest',
-              sheetId,
-              id: t.id,
-              title: t.title,
-              gradeLevel: t.gradeLevel,
-              durationMinutes: t.durationMinutes,
-              totalQuestions: t.totalQuestions,
-              variantCode: t.variants?.[0]?.code || '101',
-              authorName: t.authorName || 'Giáo viên',
-              createdAt: t.createdAt,
-              status: t.status || 'READY'
-            });
-          }
-          return { success: true, message: `Đã lưu danh sách ${tests.length} Đề thi lên Google Sheet thành công!` };
-        } catch (fbErr: any) {
-          return { success: false, message: fbErr.message || 'Lỗi lưu đề thi' };
-        }
-      }
-
-      return { success: false, message: res.error || 'Lỗi gửi lên Apps Script' };
+      return {
+        success: false,
+        needScriptUpdate: res.unsupportedAction,
+        message: res.error || 'Lỗi gửi lên Apps Script'
+      };
     }
     return { success: false, message: 'Chưa kết nối Google Sheet hoặc cấu hình Apps Script' };
   }
@@ -2459,7 +2512,7 @@ export class GoogleSheetsService {
   /**
    * Đồng bộ / Ghi đè trực tiếp danh sách Giao đề lên Google Sheet (hỗ trợ cả OAuth và Apps Script)
    */
-  static async pushAssignmentsToGoogleSheet(): Promise<{ success: boolean; message: string }> {
+  static async pushAssignmentsToGoogleSheet(): Promise<{ success: boolean; message: string; needScriptUpdate?: boolean }> {
     const sheetId = getSavedSheetId();
     const token = getGoogleAccessToken();
     if (sheetId && token) {
@@ -2472,6 +2525,15 @@ export class GoogleSheetsService {
     }
     const scriptUrl = getAppsScriptUrl();
     if (scriptUrl) {
+      const caps = await this.checkAppsScriptCapabilities();
+      if (!caps.supportsAssignments) {
+        return {
+          success: false,
+          needScriptUpdate: true,
+          message: 'Google Apps Script trên Google Sheet chưa được triển khai phiên bản mới để hỗ trợ lưu Đợt giao đề (GiaoDe). Đợt giao hiện chỉ lưu tạm trên trình duyệt này! Vui lòng cập nhật Apps Script hoặc dùng nút "Xuất file dữ liệu" để chuyển sang máy khác.'
+        };
+      }
+
       const rows = this.buildGiaoDeRows();
       const res = await this.postToAppsScript({
         action: 'batchPushAllData',
@@ -2482,35 +2544,11 @@ export class GoogleSheetsService {
         return { success: true, message: 'Đã lưu danh sách Giao bài lên sheet GiaoDe (qua Apps Script) thành công!' };
       }
 
-      // Tự động chuyển sang fallback gọi action 'saveAssignment' cho từng đợt giao bài nếu script chưa có batchPushAllData
-      if (res.unsupportedAction || (res.error && res.error.includes('Unsupported action'))) {
-        try {
-          const assignments = LMSStorageService.getAssignments();
-          for (const a of assignments) {
-            await this.postToAppsScript({
-              action: 'saveAssignment',
-              sheetId,
-              id: a.id,
-              testTitle: a.testTitle,
-              gradeLevel: a.gradeLevel,
-              classNames: a.classNames,
-              startTime: a.startTime,
-              endTime: a.endTime,
-              password: a.password || 'Không có',
-              allowReviewAfterSubmit: a.allowReviewAfterSubmit,
-              shuffleQuestions: a.shuffleQuestions,
-              assignedByName: a.assignedByName || 'Giáo viên',
-              createdAt: a.createdAt,
-              status: a.status || 'ACTIVE'
-            });
-          }
-          return { success: true, message: `Đã lưu danh sách ${assignments.length} đợt Giao bài lên Google Sheet thành công!` };
-        } catch (fbErr: any) {
-          return { success: false, message: fbErr.message || 'Lỗi lưu đợt giao đề' };
-        }
-      }
-
-      return { success: false, message: res.error || 'Lỗi gửi lên Apps Script' };
+      return {
+        success: false,
+        needScriptUpdate: res.unsupportedAction,
+        message: res.error || 'Lỗi gửi lên Apps Script'
+      };
     }
     return { success: false, message: 'Chưa kết nối Google Sheet hoặc cấu hình Apps Script' };
   }
@@ -3055,6 +3093,8 @@ export class GoogleSheetsService {
     count?: number;
     questionsCount?: number;
     supportsSaveQuestion?: boolean;
+    supportsTests?: boolean;
+    supportsAssignments?: boolean;
     message: string;
   }> {
     const scriptUrl = getAppsScriptUrl();
@@ -3071,32 +3111,19 @@ export class GoogleSheetsService {
       const data = await res.json();
       const qCount = Array.isArray(data) ? Math.max(0, data.length - 1) : 0;
 
-      // 2. Kiểm tra quyền ghi câu hỏi (saveQuestion)
-      let supportsSaveQuestion = false;
-      try {
-        const testRes = await fetch(scriptUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({ action: 'saveQuestion', testPing: true })
-        });
-        if (testRes.ok) {
-          const testJson = await testRes.json();
-          if (!testJson.error || !String(testJson.error).includes('Unsupported action')) {
-            supportsSaveQuestion = true;
-          }
-        }
-      } catch {}
+      const caps = await this.checkAppsScriptCapabilities(true);
+      const isFullV2 = caps.supportsTests && caps.supportsAssignments;
 
       return {
         success: true,
         count: qCount,
         questionsCount: qCount,
-        supportsSaveQuestion,
-        message: `Kết nối thành công! Đã nạp ${qCount} câu hỏi từ Google Sheet (sheet CauHoi).${
-          supportsSaveQuestion
-            ? ' Hỗ trợ đầy đủ quyền đọc/ghi toàn bộ các sheet CSDL (9 sheet).'
-            : ' (Lưu ý: Apps Script đang chạy phiên bản cũ, vui lòng cập nhật phiên bản mới để tự động ghi câu hỏi).'
-        }`
+        supportsSaveQuestion: isFullV2,
+        supportsTests: caps.supportsTests,
+        supportsAssignments: caps.supportsAssignments,
+        message: isFullV2
+          ? `Kết nối thành công! Đã nạp ${qCount} câu hỏi từ Google Sheet (sheet CauHoi). Hỗ trợ đầy đủ quyền đọc/ghi toàn bộ các sheet CSDL (9 sheet).`
+          : `⚠️ Kết nối đọc được ${qCount} câu hỏi, nhưng Apps Script trên Google Drive đang chạy phiên bản cũ (chưa hỗ trợ lệnh lưu Đề thi & Giao đề). Vui lòng cập nhật mã Apps Script theo hướng dẫn bên dưới để đồng bộ dữ liệu giữa các trình duyệt.`
       };
     } catch (err: any) {
       return { success: false, message: err.message || 'Không thể kết nối tới Google Apps Script URL' };
