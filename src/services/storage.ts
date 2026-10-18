@@ -1160,14 +1160,6 @@ export class LMSStorageService {
       };
     });
 
-    if (!normalized.some((q) => q.imageUrl)) {
-      const q1 = normalized.find((q) => q.id === 'q-01');
-      if (q1) {
-        q1.imageUrl = 'https://images.unsplash.com/photo-1587829741301-dc798b83add3?auto=format&fit=crop&w=800&q=80';
-        q1.imageDriveUrl = 'https://drive.google.com/file/d/1A_thcsphuho_keyboard_input/view?usp=sharing';
-      }
-    }
-
     return normalized;
   }
 
@@ -1252,7 +1244,19 @@ export class LMSStorageService {
   // Tests
   static getTests(): Test[] {
     const list = getStored<Test[]>(STORAGE_KEYS.TESTS, INITIAL_TESTS);
-    return list.map((test) => {
+    const existingIds = new Set(list.map((t) => t.id));
+    let hasMissing = false;
+    const merged = [...list];
+    INITIAL_TESTS.forEach((initT) => {
+      if (!existingIds.has(initT.id)) {
+        merged.push(initT);
+        hasMissing = true;
+      }
+    });
+    if (hasMissing) {
+      setStored(STORAGE_KEYS.TESTS, merged);
+    }
+    return merged.map((test) => {
       if (test.matrix?.selectedTopics && test.matrix.selectedTopics.some((t) => t.includes('Chủ đề A') || t.includes('Chủ đề B') || t.includes('Chủ đề C') || t.includes('Chủ đề D') || t.includes('Chủ đề E') || t.includes('Chủ đề F'))) {
         const normalized = test.matrix.selectedTopics.map((top) => normalizeKNTTTopic(top, test.gradeLevel));
         return {
@@ -1359,7 +1363,20 @@ export class LMSStorageService {
 
   // Assignments
   static getAssignments(): Assignment[] {
-    return getStored<Assignment[]>(STORAGE_KEYS.ASSIGNMENTS, INITIAL_ASSIGNMENTS);
+    const list = getStored<Assignment[]>(STORAGE_KEYS.ASSIGNMENTS, INITIAL_ASSIGNMENTS);
+    const existingIds = new Set(list.map((a) => a.id));
+    let hasMissing = false;
+    const merged = [...list];
+    INITIAL_ASSIGNMENTS.forEach((initA) => {
+      if (!existingIds.has(initA.id)) {
+        merged.push(initA);
+        hasMissing = true;
+      }
+    });
+    if (hasMissing) {
+      setStored(STORAGE_KEYS.ASSIGNMENTS, merged);
+    }
+    return merged;
   }
 
   static addAssignment(a: Assignment): void {
@@ -1446,20 +1463,30 @@ export class LMSStorageService {
   // Submissions
   static getSubmissions(): Submission[] {
     const rawSubs = getStored<Submission[]>(STORAGE_KEYS.SUBMISSIONS, INITIAL_SUBMISSIONS);
+    const existingIds = new Set(rawSubs.map((s) => s.id));
+    let hasMissing = false;
+    const mergedSubs = [...rawSubs];
+    INITIAL_SUBMISSIONS.forEach((initS) => {
+      if (!existingIds.has(initS.id)) {
+        mergedSubs.push(initS);
+        hasMissing = true;
+      }
+    });
+
     const deletedIds = this.getDeletedUserIds();
     const activeUsers = this.getUsers().filter((u) => u.status !== 'DELETED');
     const activeUserIds = new Set(activeUsers.map((u) => u.id));
     const activeStudentCodes = new Set(activeUsers.map((u) => u.studentCode).filter(Boolean));
 
     // Lọc bỏ triệt để các bài nộp của tài khoản đã xóa, chỉ lưu và đọc kết quả tài khoản còn hoạt động
-    const filtered = rawSubs.filter((s) => {
+    const filtered = mergedSubs.filter((s) => {
       if (deletedIds.has(s.studentId)) return false;
       if (s.studentCode && activeStudentCodes.has(s.studentCode)) return true;
       if (activeUserIds.has(s.studentId)) return true;
       return false;
     });
 
-    if (filtered.length !== rawSubs.length) {
+    if (hasMissing || filtered.length !== rawSubs.length) {
       setStored(STORAGE_KEYS.SUBMISSIONS, filtered);
     }
     return filtered;
@@ -1687,7 +1714,7 @@ export class LMSStorageService {
     return result;
   }
 
-  // Reset to sample initial database
+  // Xóa toàn bộ dữ liệu mẫu và đặt lại hệ thống về trạng thái sạch ban đầu
   static resetToDefault(): void {
     localStorage.removeItem(STORAGE_KEYS.SCHOOL);
     localStorage.removeItem(STORAGE_KEYS.ACADEMIC_YEARS);
@@ -1696,10 +1723,90 @@ export class LMSStorageService {
     localStorage.removeItem(STORAGE_KEYS.USERS);
     localStorage.removeItem(STORAGE_KEYS.TOPICS);
     localStorage.removeItem(STORAGE_KEYS.QUESTIONS);
+    localStorage.removeItem(STORAGE_KEYS.DELETED_QUESTION_IDS);
+    localStorage.removeItem(STORAGE_KEYS.DELETED_USER_IDS);
     localStorage.removeItem(STORAGE_KEYS.TESTS);
     localStorage.removeItem(STORAGE_KEYS.ASSIGNMENTS);
     localStorage.removeItem(STORAGE_KEYS.SUBMISSIONS);
     localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+    this.purgeAllMockData();
+    notifyChange('all');
+  }
+
+  // Quét và xóa sạch toàn bộ các dữ liệu mẫu cũ (câu hỏi mẫu, đề thi mẫu, bài tập mẫu, điểm mẫu, học sinh mẫu)
+  static purgeAllMockData(): void {
+    try {
+      const mockStudentPrefixes = ['user-student-'];
+      const mockUsernames = new Set([
+        'hs.phuc.8a7', 'hs.ha.8a7', 'hs.minh.8a7', 'hs.linh.8a7',
+        'hs.kien.8a8', 'hs.vy.8a8', 'hs.khoi.8a8', 'hs.mai.8a8',
+        'hs.tri.6a1', 'hs.nga.6a1', 'hs.nam.6a1', 'hs.anh.7a1',
+        'hs.tuyet.6a1', 'hs.huy.6a1', 'hs.ngoc.6a2', 'hs.duy.6a2',
+        'hs.linh.6a2', 'hs.khoi.7a1', 'hs.thao.7a1'
+      ]);
+      const mockQuestionIds = new Set([
+        'q-01', 'q-02', 'q-03', 'q-04', 'q-05', 'q-06', 'q-07', 'q-08', 'q-09', 'q-10',
+        'q-11', 'q-12', 'q-13', 'q-14', 'q-15', 'q-16', 'q-17', 'q-18', 'q-19', 'q-20'
+      ]);
+      const mockTestIds = new Set([
+        'test-th6-gk1', 'test-th6-15p', 'test-th8-gk1', 'test-th8-15p', 'test-th7-gk1'
+      ]);
+      const mockAssignmentIds = new Set([
+        'assign-th8-01', 'assign-th8-02', 'assign-th7-01', 'assign-01', 'assign-02'
+      ]);
+      const mockSubmissionIds = new Set([
+        'sub-8701', 'sub-8702', 'sub-01', 'sub-02', 'sub-03', 'sub-04'
+      ]);
+
+      // 1. Lọc sạch câu hỏi mẫu
+      const currentQuestions = getStored<Question[]>(STORAGE_KEYS.QUESTIONS, []);
+      const cleanQuestions = currentQuestions.filter((q) => !mockQuestionIds.has(q.id));
+      setStored(STORAGE_KEYS.QUESTIONS, cleanQuestions);
+
+      // 2. Lọc sạch đề thi mẫu
+      const currentTests = getStored<Test[]>(STORAGE_KEYS.TESTS, []);
+      const cleanTests = currentTests.filter((t) => !mockTestIds.has(t.id));
+      setStored(STORAGE_KEYS.TESTS, cleanTests);
+
+      // 3. Lọc sạch bài tập mẫu
+      const currentAssignments = getStored<Assignment[]>(STORAGE_KEYS.ASSIGNMENTS, []);
+      const cleanAssignments = currentAssignments.filter((a) => !mockAssignmentIds.has(a.id));
+      setStored(STORAGE_KEYS.ASSIGNMENTS, cleanAssignments);
+
+      // 4. Lọc sạch kết quả bài nộp mẫu
+      const currentSubmissions = getStored<Submission[]>(STORAGE_KEYS.SUBMISSIONS, []);
+      const cleanSubmissions = currentSubmissions.filter((s) => {
+        if (mockSubmissionIds.has(s.id)) return false;
+        if (mockStudentPrefixes.some((p) => s.studentId?.startsWith(p))) return false;
+        return true;
+      });
+      setStored(STORAGE_KEYS.SUBMISSIONS, cleanSubmissions);
+
+      // 5. Lọc sạch tài khoản học sinh mẫu (giữ tài khoản BGH, GV và các tài khoản tạo thực tế)
+      const currentUsers = getStored<User[]>(STORAGE_KEYS.USERS, []);
+      const cleanUsers = currentUsers.filter((u) => {
+        if (mockStudentPrefixes.some((p) => u.id?.startsWith(p))) return false;
+        if (u.username && mockUsernames.has(u.username.toLowerCase())) return false;
+        return true;
+      });
+      setStored(STORAGE_KEYS.USERS, cleanUsers);
+
+      // 6. Đặt lại sĩ số các lớp theo người dùng thực tế
+      const currentClasses = getStored<ClassRoom[]>(STORAGE_KEYS.CLASSES, []);
+      const realStudentCountByClass = new Map<string, number>();
+      cleanUsers.forEach((u) => {
+        if (u.role === 'STUDENT' && u.classId && u.status === 'ACTIVE') {
+          realStudentCountByClass.set(u.classId, (realStudentCountByClass.get(u.classId) || 0) + 1);
+        }
+      });
+      const cleanClasses = currentClasses.map((c) => ({
+        ...c,
+        studentCount: realStudentCountByClass.get(c.id) || 0
+      }));
+      setStored(STORAGE_KEYS.CLASSES, cleanClasses);
+    } catch (e) {
+      console.warn('Lỗi khi làm sạch dữ liệu mẫu:', e);
+    }
   }
 
   // Export all DB to JSON backup
@@ -2166,3 +2273,17 @@ export class LMSStorageService {
     return '\uFEFF' + [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
   }
 }
+
+// Tự động quét và dọn sạch dữ liệu mẫu tồn đọng trong localStorage khi khởi động
+try {
+  if (typeof window !== 'undefined' && window.localStorage) {
+    const PURGE_KEY = 'phuho_lms_clean_mock_v4';
+    if (!localStorage.getItem(PURGE_KEY)) {
+      LMSStorageService.purgeAllMockData();
+      localStorage.setItem(PURGE_KEY, 'true');
+    }
+  }
+} catch {
+  // ignore
+}
+

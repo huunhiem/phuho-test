@@ -362,10 +362,10 @@ export const Header: React.FC<HeaderProps> = ({
                           setDropdownOpen(false);
                           setShowResetConfirm(true);
                         }}
-                        className="w-full flex items-center gap-2 px-3 py-2 text-xs text-amber-700 hover:bg-amber-50 rounded-lg transition-colors cursor-pointer"
+                        className="w-full flex items-center gap-2 px-3 py-2 text-xs text-rose-700 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
                       >
-                        <RotateCcw className="w-3.5 h-3.5 text-amber-600" />
-                        <span>Khôi phục dữ liệu mẫu THCS Phú Hồ</span>
+                        <RotateCcw className="w-3.5 h-3.5 text-rose-600" />
+                        <span>Xóa dữ liệu & Đặt lại hệ thống</span>
                       </button>
                     )}
 
@@ -406,11 +406,11 @@ export const Header: React.FC<HeaderProps> = ({
       {/* Reset Confirmation Dialog (Dành cho Quản trị viên) */}
       <ConfirmDialog
         isOpen={showResetConfirm}
-        title="Khôi phục dữ liệu mẫu"
-        message="Hệ thống sẽ đặt lại toàn bộ dữ liệu mẫu ban đầu về học sinh, lớp học, ngân hàng câu hỏi và các đề thi của THCS Phú Hồ. Bạn có chắc chắn muốn thực hiện?"
-        confirmLabel="Khôi phục dữ liệu"
+        title="Xóa dữ liệu & Đặt lại hệ thống"
+        message="Hệ thống sẽ làm sạch dữ liệu câu hỏi, đề thi, bài tập và học sinh mẫu, đưa hệ thống về trạng thái sạch ban đầu của trường THCS Phú Hồ. Bạn có chắc chắn muốn thực hiện?"
+        confirmLabel="Xác nhận đặt lại"
         cancelLabel="Hủy"
-        isDanger={false}
+        isDanger={true}
         onConfirm={() => {
           setShowResetConfirm(false);
           onResetData();

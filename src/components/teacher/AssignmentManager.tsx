@@ -23,7 +23,8 @@ import {
   ExternalLink,
   Check,
   X,
-  HelpCircle
+  HelpCircle,
+  Copy
 } from 'lucide-react';
 import { Assignment, Test, User, ClassRoom, Submission, Question } from '../../types';
 import { LMSStorageService, safeFormatDateTimeForInput } from '../../services/storage';
@@ -64,23 +65,88 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
   }, [allTests, isAdmin, currentUser]);
 
   const [assignments, setAssignments] = useState<Assignment[]>(() => LMSStorageService.getAssignments());
-  const [assignScopeFilter, setAssignScopeFilter] = useState<'ALL' | 'MINE'>('ALL');
+  const [assignScopeFilter, setAssignScopeFilter] = useState<'ALL' | 'MINE' | 'TEACHING'>(isAdmin ? 'ALL' : 'TEACHING');
+  const [selectedClassFilter, setSelectedClassFilter] = useState<string>('ALL');
+  const [selectedGradeFilter, setSelectedGradeFilter] = useState<string>('ALL');
+  const [searchAssignQuery, setSearchAssignQuery] = useState<string>('');
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+  const [shareText, setShareText] = useState('');
+  const [copiedShare, setCopiedShare] = useState(false);
+  const [importShareError, setImportShareError] = useState('');
+  const [importShareSuccess, setImportShareSuccess] = useState('');
   const [isPullingAssignments, setIsPullingAssignments] = useState(false);
   const [isSyncingAssignments, setIsSyncingAssignments] = useState(false);
   const [syncAssignMessage, setSyncAssignMessage] = useState<string | null>(null);
   const [validationError, setValidationError] = useState<string>('');
 
-  // Hiển thị đợt giao bài: Riêng tài khoản quản trị hiển thị tất cả; Tài khoản nào giao đề thì chỉ hiển thị ở tài khoản đó
+  // Chuẩn hóa chuỗi tên lớp học (ví dụ: '8-7', '8/7', '8a7', 'cls-8-7' -> '8-7')
+  const normalizeClassKey = (str: string): string => {
+    if (!str) return '';
+    return str.toLowerCase().replace(/lớp|lop|cls-|\s+/g, '').replace(/[/.a]/g, '-');
+  };
+
+  // Hiển thị đợt giao bài theo lớp học và phân quyền linh hoạt
   const visibleAssignments = useMemo(() => {
-    if (isAdmin) {
+    let list = assignments;
+
+    // 1. Phân quyền và phạm vi hiển thị
+    if (!isAdmin) {
       if (assignScopeFilter === 'MINE') {
-        return assignments.filter((a) => LMSStorageService.isAssignmentCreatedByUser(a, currentUser));
+        list = list.filter((a) => LMSStorageService.isAssignmentCreatedByUser(a, currentUser));
+      } else if (assignScopeFilter === 'TEACHING') {
+        const myClassNames = new Set(classes.map((c) => c.name));
+        const myClassIds = new Set(classes.map((c) => c.id));
+        const myClassKeys = new Set(classes.map((c) => normalizeClassKey(c.name)));
+
+        list = list.filter((a) => {
+          if (LMSStorageService.isAssignmentCreatedByUser(a, currentUser)) return true;
+          if (a.classIds.some((cid) => myClassIds.has(cid))) return true;
+          if (a.classNames.some((cname) => myClassNames.has(cname))) return true;
+          if (a.classNames.some((cname) => myClassKeys.has(normalizeClassKey(cname)))) return true;
+          return false;
+        });
       }
-      return assignments;
+      // 'ALL': giáo viên vẫn có thể bấm xem toàn trường khi cần tham khảo đề thi của khối
+    } else {
+      if (assignScopeFilter === 'MINE') {
+        list = list.filter((a) => LMSStorageService.isAssignmentCreatedByUser(a, currentUser));
+      }
     }
-    // Giáo viên thông thường: Đợt giao của tài khoản nào thì CHỈ hiển thị ở tài khoản đó
-    return assignments.filter((a) => LMSStorageService.isAssignmentCreatedByUser(a, currentUser));
-  }, [assignments, isAdmin, assignScopeFilter, currentUser]);
+
+    // 2. Lọc theo Khối lớp
+    if (selectedGradeFilter !== 'ALL') {
+      const gNum = parseInt(selectedGradeFilter, 10);
+      list = list.filter((a) => a.gradeLevel === gNum);
+    }
+
+    // 3. Lọc theo Lớp học được giao cụ thể
+    if (selectedClassFilter !== 'ALL') {
+      const targetClass = allClasses.find((c) => c.id === selectedClassFilter);
+      const targetName = targetClass?.name || selectedClassFilter;
+      const targetKey = normalizeClassKey(targetName);
+
+      list = list.filter((a) => {
+        if (a.classIds.includes(selectedClassFilter)) return true;
+        if (a.classNames.includes(targetName)) return true;
+        if (a.classNames.some((cn) => normalizeClassKey(cn) === targetKey)) return true;
+        if (a.classIds.some((cid) => normalizeClassKey(cid) === targetKey)) return true;
+        return false;
+      });
+    }
+
+    // 4. Tìm kiếm từ khóa (tên đề thi, tên lớp, giáo viên giao đề)
+    if (searchAssignQuery.trim()) {
+      const q = searchAssignQuery.trim().toLowerCase();
+      list = list.filter(
+        (a) =>
+          a.testTitle.toLowerCase().includes(q) ||
+          a.classNames.some((cn) => cn.toLowerCase().includes(q)) ||
+          (a.assignedByName && a.assignedByName.toLowerCase().includes(q))
+      );
+    }
+
+    return list;
+  }, [assignments, isAdmin, assignScopeFilter, selectedClassFilter, selectedGradeFilter, searchAssignQuery, currentUser, classes, allClasses]);
 
   // Modal chi tiết bài làm học sinh
   const [selectedSubDetail, setSelectedSubDetail] = useState<Submission | null>(null);
@@ -169,6 +235,71 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
       setSyncAssignMessage(`⚠️ Lỗi đồng bộ: ${err.message || String(err)}`);
     } finally {
       setIsSyncingAssignments(false);
+    }
+  };
+
+  const handleOpenShareModal = () => {
+    const pkg = {
+      version: '1.0',
+      exportedAt: new Date().toISOString(),
+      school: 'THCS Phú Hồ',
+      tests: LMSStorageService.getTests(),
+      assignments: LMSStorageService.getAssignments()
+    };
+    setShareText(JSON.stringify(pkg, null, 2));
+    setImportShareError('');
+    setImportShareSuccess('');
+    setCopiedShare(false);
+    setIsShareModalOpen(true);
+  };
+
+  const handleCopyShare = () => {
+    navigator.clipboard.writeText(shareText);
+    setCopiedShare(true);
+    setTimeout(() => setCopiedShare(false), 2500);
+  };
+
+  const handleDownloadShareFile = () => {
+    const blob = new Blob([shareText], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `goi-de-thi-giao-de-thcs-phuho-${new Date().toISOString().split('T')[0]}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImportShare = () => {
+    try {
+      setImportShareError('');
+      setImportShareSuccess('');
+      if (!shareText.trim()) {
+        setImportShareError('Vui lòng dán nội dung mã gói dữ liệu JSON vào ô bên dưới!');
+        return;
+      }
+      const parsed = JSON.parse(shareText.trim());
+      let tCount = 0;
+      let aCount = 0;
+      if (Array.isArray(parsed.tests) && parsed.tests.length > 0) {
+        LMSStorageService.importTests(parsed.tests);
+        tCount = parsed.tests.length;
+      }
+      if (Array.isArray(parsed.assignments) && parsed.assignments.length > 0) {
+        LMSStorageService.importAssignments(parsed.assignments);
+        aCount = parsed.assignments.length;
+      }
+      if (tCount === 0 && aCount === 0) {
+        setImportShareError('Không tìm thấy danh sách đề thi (tests) hoặc giao đề (assignments) trong dữ liệu!');
+        return;
+      }
+      refreshAssignments();
+      setImportShareSuccess(`✓ Đã nạp thành công ${tCount} đề thi và ${aCount} đợt giao bài vào hệ thống!`);
+      setTimeout(() => {
+        setIsShareModalOpen(false);
+        setImportShareSuccess('');
+      }, 2000);
+    } catch (e: any) {
+      setImportShareError('Dữ liệu JSON không hợp lệ: ' + (e.message || String(e)));
     }
   };
 
@@ -422,44 +553,160 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
         </div>
       )}
 
-      {/* Scope Filter Tabs */}
-      <div className="flex items-center justify-between gap-3 border-b border-slate-200 pb-3">
-        {isAdmin ? (
-          <div className="flex items-center gap-2">
+      {/* Bộ lọc hiển thị theo Lớp học được giao, Khối lớp và Phạm vi phụ trách */}
+      <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs space-y-3.5">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
+          {/* Tabs phạm vi */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            {!isAdmin ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setAssignScopeFilter('TEACHING')}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+                    assignScopeFilter === 'TEACHING'
+                      ? 'bg-indigo-600 text-white shadow-xs'
+                      : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200'
+                  }`}
+                >
+                  🏫 Lớp tôi phụ trách ({classes.map(c => c.name).join(', ') || 'Chưa gán'})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAssignScopeFilter('MINE')}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+                    assignScopeFilter === 'MINE'
+                      ? 'bg-indigo-600 text-white shadow-xs'
+                      : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200'
+                  }`}
+                >
+                  👤 Do tôi giao ({assignments.filter((a) => LMSStorageService.isAssignmentCreatedByUser(a, currentUser)).length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAssignScopeFilter('ALL')}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+                    assignScopeFilter === 'ALL'
+                      ? 'bg-indigo-600 text-white shadow-xs'
+                      : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200'
+                  }`}
+                >
+                  🌐 Toàn trường ({assignments.length})
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setAssignScopeFilter('ALL')}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+                    assignScopeFilter === 'ALL'
+                      ? 'bg-indigo-600 text-white shadow-xs'
+                      : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200'
+                  }`}
+                >
+                  🌐 Tất cả đợt giao toàn trường ({assignments.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAssignScopeFilter('MINE')}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
+                    assignScopeFilter === 'MINE'
+                      ? 'bg-indigo-600 text-white shadow-xs'
+                      : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200'
+                  }`}
+                >
+                  👤 Do tôi giao ({assignments.filter((a) => LMSStorageService.isAssignmentCreatedByUser(a, currentUser)).length})
+                </button>
+              </>
+            )}
+          </div>
+
+          {/* Nút chia sẻ gói giao đề giữa các máy / trình duyệt */}
+          <button
+            type="button"
+            onClick={handleOpenShareModal}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 transition-colors cursor-pointer"
+            title="Xuất hoặc nhập toàn bộ đề thi & giao đề để dùng ngay trên các trình duyệt / máy tính khác"
+          >
+            <DownloadCloud className="w-3.5 h-3.5" />
+            <span>Chia sẻ / Đồng bộ gói Đề thi & Giao đề (JSON)</span>
+          </button>
+        </div>
+
+        {/* Thanh lọc chi tiết theo Lớp, Khối và Tìm kiếm */}
+        <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-center">
+          {/* Lọc theo Lớp học được giao */}
+          <div className="sm:col-span-5 flex items-center gap-2">
+            <span className="text-xs font-semibold text-slate-600 shrink-0">Lọc theo Lớp:</span>
+            <select
+              value={selectedClassFilter}
+              onChange={(e) => setSelectedClassFilter(e.target.value)}
+              className="w-full px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            >
+              <option value="ALL">🏫 Tất cả các lớp ({allClasses.length} lớp)</option>
+              {allClasses.map((cls) => (
+                <option key={cls.id} value={cls.id}>
+                  Lớp {cls.name} ({cls.studentCount || 40} HS) - Khối {cls.gradeId ? cls.gradeId.replace('grade-', '') : '8'}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Lọc theo Khối */}
+          <div className="sm:col-span-3 flex items-center gap-2">
+            <span className="text-xs font-semibold text-slate-600 shrink-0">Khối:</span>
+            <select
+              value={selectedGradeFilter}
+              onChange={(e) => setSelectedGradeFilter(e.target.value)}
+              className="w-full px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            >
+              <option value="ALL">Tất cả khối</option>
+              <option value="6">Khối 6</option>
+              <option value="7">Khối 7</option>
+              <option value="8">Khối 8</option>
+              <option value="9">Khối 9</option>
+            </select>
+          </div>
+
+          {/* Tìm kiếm */}
+          <div className="sm:col-span-4 relative">
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              placeholder="Tìm theo tên bài thi, lớp..."
+              value={searchAssignQuery}
+              onChange={(e) => setSearchAssignQuery(e.target.value)}
+              className="w-full pl-8 pr-3 py-1.5 rounded-lg border border-slate-200 text-xs bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+          </div>
+        </div>
+
+        {/* Thông tin số lượng kết quả */}
+        <div className="flex items-center justify-between text-xs text-slate-500 pt-1">
+          <span>
+            Đang hiển thị <strong>{visibleAssignments.length}</strong> / <strong>{assignments.length}</strong> đợt giao bài kiểm tra
+            {selectedClassFilter !== 'ALL' && (
+              <span className="text-indigo-600 font-medium"> · Lớp được chọn: {allClasses.find(c => c.id === selectedClassFilter)?.name || selectedClassFilter}</span>
+            )}
+            {selectedGradeFilter !== 'ALL' && (
+              <span className="text-indigo-600 font-medium"> · Khối: {selectedGradeFilter}</span>
+            )}
+          </span>
+          {(selectedClassFilter !== 'ALL' || selectedGradeFilter !== 'ALL' || searchAssignQuery.trim()) && (
             <button
               type="button"
-              onClick={() => setAssignScopeFilter('ALL')}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
-                assignScopeFilter === 'ALL'
-                  ? 'bg-indigo-600 text-white shadow-xs'
-                  : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
-              }`}
+              onClick={() => {
+                setSelectedClassFilter('ALL');
+                setSelectedGradeFilter('ALL');
+                setSearchAssignQuery('');
+              }}
+              className="text-xs font-semibold text-rose-600 hover:text-rose-700 underline cursor-pointer"
             >
-              Tất cả đợt giao ({assignments.length})
+              Xóa bộ lọc
             </button>
-            <button
-              type="button"
-              onClick={() => setAssignScopeFilter('MINE')}
-              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors cursor-pointer ${
-                assignScopeFilter === 'MINE'
-                  ? 'bg-indigo-600 text-white shadow-xs'
-                  : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
-              }`}
-            >
-              Đợt giao do tôi tạo ({assignments.filter((a) => LMSStorageService.isAssignmentCreatedByUser(a, currentUser)).length})
-            </button>
-          </div>
-        ) : (
-          <div className="flex items-center gap-2">
-            <span className="px-3 py-1.5 text-xs font-semibold rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-200">
-              Đợt giao bài do tôi tạo ({visibleAssignments.length})
-            </span>
-            <span className="text-xs text-slate-400">· Tài khoản nào giao đề chỉ hiển thị ở tài khoản đó (Riêng Quản trị viên xem tất cả)</span>
-          </div>
-        )}
-        <span className="text-xs text-slate-400">
-          Hiển thị <strong>{visibleAssignments.length}</strong> đợt giao bài
-        </span>
+          )}
+        </div>
       </div>
 
       {/* Assignment List */}
@@ -1238,6 +1485,101 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
         onConfirm={confirmDeleteAssignment}
         onCancel={() => setDeleteAssignId(null)}
       />
+
+      {/* Modal Chia sẻ / Đồng bộ gói Đề thi & Giao đề giữa các trình duyệt & thiết bị */}
+      {isShareModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs overflow-y-auto">
+          <div className="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl space-y-4 my-8">
+            <div className="flex items-start justify-between">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-indigo-50 text-indigo-600">
+                  <DownloadCloud className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-slate-900">Chia sẻ & Đồng bộ gói Đề thi & Giao đề</h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Xuất hoặc nhập toàn bộ dữ liệu Đề thi và Đợt giao đề để sử dụng ngay trên các trình duyệt / máy tính / IP khác
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsShareModalOpen(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {importShareSuccess && (
+              <div className="p-3 bg-emerald-50 text-emerald-800 text-xs rounded-xl flex items-center gap-2 border border-emerald-200">
+                <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>{importShareSuccess}</span>
+              </div>
+            )}
+
+            {importShareError && (
+              <div className="p-3 bg-rose-50 text-rose-800 text-xs rounded-xl flex items-center gap-2 border border-rose-200">
+                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>{importShareError}</span>
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-xs text-slate-600 font-semibold">
+                <span>Nội dung mã gói dữ liệu (JSON):</span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleCopyShare}
+                    className="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-800 cursor-pointer"
+                  >
+                    {copiedShare ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{copiedShare ? 'Đã sao chép!' : 'Sao chép mã'}</span>
+                  </button>
+                  <span>·</span>
+                  <button
+                    type="button"
+                    onClick={handleDownloadShareFile}
+                    className="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-800 cursor-pointer"
+                  >
+                    <DownloadCloud className="w-3.5 h-3.5" />
+                    <span>Tải tệp .json</span>
+                  </button>
+                </div>
+              </div>
+              <textarea
+                value={shareText}
+                onChange={(e) => setShareText(e.target.value)}
+                rows={10}
+                placeholder="Dán mã gói dữ liệu JSON vào đây để nạp vào hệ thống..."
+                className="w-full p-3 font-mono text-xs rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+              <p className="text-[11px] text-slate-400">
+                💡 <strong>Cách dùng:</strong> Trên máy vừa tạo đề/giao đề, bấm "Sao chép mã" hoặc "Tải tệp". Sau đó trên máy/trình duyệt khác, mở mục này, dán mã vào ô trên rồi bấm nút <strong>"Nạp vào hệ thống"</strong> bên dưới.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setIsShareModalOpen(false)}
+                className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
+              >
+                Đóng
+              </button>
+              <button
+                type="button"
+                onClick={handleImportShare}
+                className="px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
+              >
+                <UploadCloud className="w-4 h-4" />
+                <span>Nạp vào hệ thống ngay</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Cập nhật Apps Script & Hướng dẫn đồng bộ sang máy khác */}
       <AppsScriptUpdateNoticeModal

@@ -34,24 +34,76 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser 
   };
 
   const classes = LMSStorageService.getClasses();
-  const studentClass = currentUser.classId
-    ? (classes.find((c) => c.id === currentUser.classId)?.name || currentUser.classId.replace('cls-', '').replace('-', '/'))
-    : '8/7';
+
+  // Nhận diện lớp học của học sinh một cách toàn diện
+  const detectedClassObj = currentUser.classId
+    ? classes.find((c) => c.id === currentUser.classId || c.name === currentUser.classId)
+    : undefined;
+
+  let studentClassName = detectedClassObj?.name || '';
+  if (!studentClassName && currentUser.classId) {
+    studentClassName = currentUser.classId.replace('cls-', '').replace('-', '/');
+  }
+  // Nếu chưa có classId, suy luận từ mã học sinh hoặc username (ví dụ: hs.phuc.8a7 -> 8/7, PH25-080701 -> 8/7)
+  if (!studentClassName) {
+    const rawCode = `${currentUser.studentCode || ''} ${currentUser.username || ''}`.toLowerCase();
+    if (rawCode.includes('8a7') || rawCode.includes('8.7') || rawCode.includes('8-7') || rawCode.includes('0807')) {
+      studentClassName = '8/7';
+    } else if (rawCode.includes('8a8') || rawCode.includes('8.8') || rawCode.includes('8-8') || rawCode.includes('0808')) {
+      studentClassName = '8/8';
+    } else if (rawCode.includes('6a1') || rawCode.includes('6.1') || rawCode.includes('6-1') || rawCode.includes('0601')) {
+      studentClassName = '6/1';
+    } else if (rawCode.includes('6a2') || rawCode.includes('6.2') || rawCode.includes('6-2') || rawCode.includes('0602')) {
+      studentClassName = '6/2';
+    } else if (rawCode.includes('7a1') || rawCode.includes('7.1') || rawCode.includes('7-1') || rawCode.includes('0701')) {
+      studentClassName = '7/1';
+    } else if (rawCode.includes('7a2') || rawCode.includes('7.2') || rawCode.includes('7-2') || rawCode.includes('0702')) {
+      studentClassName = '7/2';
+    } else {
+      studentClassName = '8/7';
+    }
+  }
+
+  const studentClass = studentClassName;
+
+  // Chuẩn hóa tên lớp dạng số (ví dụ: '8-7', '8/7', '8a7' -> '8-7')
+  const normalizeClassKey = (str: string): string => {
+    if (!str) return '';
+    return str.toLowerCase().replace(/lớp|lop|cls-|\s+/g, '').replace(/[/.a]/g, '-');
+  };
+
+  const studentClassKey = normalizeClassKey(studentClass);
+  const studentGradeNum = parseInt(studentClass.replace(/[^0-9]/g, '').slice(0, 1), 10) || 8;
 
   // Submissions made by this student
   const studentSubs = submissions.filter((s) => s.studentId === currentUser.id);
 
-  // Assignments for this student's class
+  // Lọc chính xác bài tập được giao theo lớp học của học sinh
   const studentAssignments = assignments.filter((a) => {
-    if (!currentUser.classId) return true;
-    const cid = currentUser.classId;
-    const cName = studentClass;
-    return (
-      a.classIds.includes(cid) ||
-      a.classNames.includes(cName) ||
-      a.classNames.some((cn) => cn === cName || cn.replace('/', '-') === cid.replace('cls-', '') || `cls-${cn.replace('/', '-')}` === cid) ||
-      a.classIds.some((id) => id === cid || id === cName || id.replace('cls-', '').replace('-', '/') === cName)
-    );
+    // 1. Nếu đợt giao cho toàn bộ khối lớp hoặc toàn trường
+    if (a.classIds?.some((id) => id.toLowerCase() === 'all' || id.toLowerCase() === `all-grade-${studentGradeNum}`)) {
+      return a.gradeLevel === studentGradeNum;
+    }
+
+    // 2. So sánh ID lớp trực tiếp
+    if (currentUser.classId && a.classIds?.includes(currentUser.classId)) return true;
+    if (detectedClassObj && a.classIds?.includes(detectedClassObj.id)) return true;
+
+    // 3. So sánh tên lớp chuẩn hóa (khớp 8/7, 8-7, 8.7, 8A7, Lớp 8/7)
+    const matchesClassName = (a.classNames || []).some((cn) => {
+      const aKey = normalizeClassKey(cn);
+      return aKey === studentClassKey || aKey.includes(studentClassKey) || studentClassKey.includes(aKey);
+    });
+    if (matchesClassName) return true;
+
+    // 4. So sánh trong mảng classIds chuẩn hóa
+    const matchesClassId = (a.classIds || []).some((cid) => {
+      const aKey = normalizeClassKey(cid);
+      return aKey === studentClassKey;
+    });
+    if (matchesClassId) return true;
+
+    return false;
   });
 
   const completedAssignmentIds = new Set(studentSubs.map((s) => s.assignmentId));

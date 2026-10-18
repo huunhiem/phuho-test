@@ -2556,6 +2556,9 @@ export class GoogleSheetsService {
   /**
    * Tải danh sách Tài khoản (TaiKhoan) từ Google Sheet qua Apps Script
    */
+  /**
+   * Tải danh sách Tài khoản (TaiKhoan) từ Google Sheet qua Apps Script
+   */
   static async pullAccountsFromAppsScript(): Promise<{ success: boolean; count: number; error?: string }> {
     const scriptUrl = getAppsScriptUrl();
     if (!scriptUrl) return { success: false, count: 0, error: 'Chưa có Apps Script URL' };
@@ -2565,17 +2568,32 @@ export class GoogleSheetsService {
       const res = await fetch(url);
       if (!res.ok) return { success: false, count: 0, error: `HTTP ${res.status}` };
       const accData = await res.json();
-      if (!Array.isArray(accData) || accData.length <= 1) return { success: true, count: 0 };
+      if (!Array.isArray(accData) || accData.length === 0) return { success: true, count: 0 };
 
-      const rows = accData.slice(1);
+      const isHeaderRow = (r: any[]) => {
+        if (!Array.isArray(r) || r.length === 0) return false;
+        const joined = r.map((c) => String(c || '').toLowerCase()).join(' ');
+        return (
+          joined.includes('tên đăng nhập') ||
+          joined.includes('username') ||
+          joined.includes('mật khẩu') ||
+          joined.includes('vai trò') ||
+          joined.includes('họ và tên')
+        );
+      };
+
+      const hasHeader = isHeaderRow(accData[0]);
+      const rows = hasHeader ? accData.slice(1) : accData;
+      if (rows.length === 0) return { success: true, count: 0 };
+
       const classes = LMSStorageService.getClasses();
       const importedUsers: User[] = [];
 
       for (const row of rows) {
-        if (!row || !row[1]) continue;
+        if (!row || (!row[0] && !row[1])) continue;
         const id = String(row[0] || `user-gsheet-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`);
-        const username = String(row[1]).trim();
-        if (username.toLowerCase() === 'tên đăng nhập') continue;
+        const username = String(row[1] || row[0]).trim();
+        if (username.toLowerCase() === 'tên đăng nhập' || !username) continue;
 
         const password = String(row[2] || '123456').trim();
         const fullName = String(row[3] || username).trim();
@@ -2638,6 +2656,70 @@ export class GoogleSheetsService {
         notifyChange('users');
       }
       return { success: true, count: importedUsers.length };
+    } catch (e: any) {
+      return { success: false, count: 0, error: e.message };
+    }
+  }
+
+  /**
+   * Tải danh sách Học sinh từ Google Sheet (sheet HocSinh) qua Apps Script
+   */
+  static async pullStudentsFromAppsScript(): Promise<{ success: boolean; count: number; error?: string }> {
+    const scriptUrl = getAppsScriptUrl();
+    if (!scriptUrl) return { success: false, count: 0, error: 'Chưa có Apps Script URL' };
+    const sheetId = getSavedSheetId();
+    try {
+      const url = `${scriptUrl}?action=getStudents${sheetId ? `&sheetId=${encodeURIComponent(sheetId)}` : ''}`;
+      const res = await fetch(url);
+      if (!res.ok) return { success: false, count: 0, error: `HTTP ${res.status}` };
+      const stuData = await res.json();
+      if (!Array.isArray(stuData) || stuData.length === 0) return { success: true, count: 0 };
+
+      const isHeader = (r: any[]) => {
+        if (!Array.isArray(r) || r.length === 0) return false;
+        const joined = r.map((c) => String(c || '').toLowerCase()).join(' ');
+        return joined.includes('họ tên') || joined.includes('mã số') || joined.includes('học sinh') || joined.includes('lớp') || joined.includes('stt');
+      };
+
+      const rows = isHeader(stuData[0]) ? stuData.slice(1) : stuData;
+      const classes = LMSStorageService.getClasses();
+      const importedStudents: User[] = [];
+
+      for (const row of rows) {
+        if (!row || (!row[0] && !row[1])) continue;
+        const fullName = String(row[1] || row[0] || '').trim();
+        if (!fullName || fullName === '""' || fullName === 'Họ và tên' || fullName.length < 2) continue;
+        const studentCode = String(row[2] || row[1] || '').trim();
+        const className = String(row[3] || row[2] || '').trim();
+        const username = String(row[4] || (studentCode ? `hs.${studentCode.toLowerCase()}` : `hs.${Date.now()}`)).trim().toLowerCase();
+        const password = String(row[5] || '123456').trim();
+        const email = String(row[6] || `${username}@thcs-phuho.edu.vn`).trim();
+
+        let matchedClass = classes.find((c) => c.name === className || c.id === className);
+        if (!matchedClass && (className.includes('8/7') || className.includes('8-7'))) matchedClass = classes.find((c) => c.id === 'cls-8-7');
+        if (!matchedClass && (className.includes('8/8') || className.includes('8-8'))) matchedClass = classes.find((c) => c.id === 'cls-8-8');
+
+        importedStudents.push({
+          id: String(row[0] && String(row[0]).startsWith('user-') ? row[0] : `user-student-${studentCode || Date.now()}-${Math.random().toString(36).substring(2, 5)}`),
+          username,
+          password,
+          fullName,
+          email,
+          role: 'STUDENT',
+          studentCode,
+          classId: matchedClass?.id,
+          gradeId: matchedClass?.gradeId || (className.startsWith('8') ? 'grade-8' : className.startsWith('7') ? 'grade-7' : className.startsWith('9') ? 'grade-9' : 'grade-6'),
+          status: 'ACTIVE',
+          schoolId: 'school-phuho-01',
+          createdAt: new Date().toISOString().split('T')[0]
+        });
+      }
+
+      if (importedStudents.length > 0) {
+        LMSStorageService.importStudents(importedStudents);
+        notifyChange('users');
+      }
+      return { success: true, count: importedStudents.length };
     } catch (e: any) {
       return { success: false, count: 0, error: e.message };
     }
@@ -2780,9 +2862,10 @@ export class GoogleSheetsService {
     let submissionsCount = 0;
 
     try {
-      // 1. Tải danh sách Tài khoản trước
+      // 1. Tải danh sách Tài khoản và Học sinh trước
       const accRes = await this.pullAccountsFromAppsScript();
-      usersCount = accRes.count;
+      const stuRes = await this.pullStudentsFromAppsScript();
+      usersCount = accRes.count + stuRes.count;
 
       // 2. Tải danh sách Lớp học và Phân công giảng dạy
       const clsRes = await this.pullClassesFromAppsScript();
