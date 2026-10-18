@@ -1736,7 +1736,12 @@ export class LMSStorageService {
   // Quét và xóa sạch toàn bộ các dữ liệu mẫu cũ (câu hỏi mẫu, đề thi mẫu, bài tập mẫu, điểm mẫu, học sinh mẫu)
   static purgeAllMockData(): void {
     try {
-      const mockStudentPrefixes = ['user-student-'];
+      const exactMockUserIds = new Set([
+        'user-student-8701', 'user-student-8702', 'user-student-8703', 'user-student-8704',
+        'user-student-8801', 'user-student-8802', 'user-student-8803', 'user-student-8804',
+        'user-student-01', 'user-student-02', 'user-student-03', 'user-student-04', 'user-student-05',
+        'user-student-06', 'user-student-07', 'user-student-08', 'user-student-09', 'user-student-10', 'user-student-11'
+      ]);
       const mockUsernames = new Set([
         'hs.phuc.8a7', 'hs.ha.8a7', 'hs.minh.8a7', 'hs.linh.8a7',
         'hs.kien.8a8', 'hs.vy.8a8', 'hs.khoi.8a8', 'hs.mai.8a8',
@@ -1777,16 +1782,18 @@ export class LMSStorageService {
       const currentSubmissions = getStored<Submission[]>(STORAGE_KEYS.SUBMISSIONS, []);
       const cleanSubmissions = currentSubmissions.filter((s) => {
         if (mockSubmissionIds.has(s.id)) return false;
-        if (mockStudentPrefixes.some((p) => s.studentId?.startsWith(p))) return false;
+        if (exactMockUserIds.has(s.studentId)) return false;
         return true;
       });
       setStored(STORAGE_KEYS.SUBMISSIONS, cleanSubmissions);
 
-      // 5. Lọc sạch tài khoản học sinh mẫu (giữ tài khoản BGH, GV và các tài khoản tạo thực tế)
+      // 5. Lọc sạch tài khoản học sinh mẫu & loại bỏ bản ghi bị lỗi cột (username là '123456')
       const currentUsers = getStored<User[]>(STORAGE_KEYS.USERS, []);
       const cleanUsers = currentUsers.filter((u) => {
-        if (mockStudentPrefixes.some((p) => u.id?.startsWith(p))) return false;
+        if (exactMockUserIds.has(u.id)) return false;
         if (u.username && mockUsernames.has(u.username.toLowerCase())) return false;
+        // Bỏ bản ghi từng bị lỗi lệch cột (username là số mật khẩu '123456')
+        if (u.username === '123456' || u.password === '8/7' || u.password === '8-7') return false;
         return true;
       });
       setStored(STORAGE_KEYS.USERS, cleanUsers);
@@ -2277,7 +2284,7 @@ export class LMSStorageService {
 // Tự động quét và dọn sạch dữ liệu mẫu tồn đọng trong localStorage khi khởi động
 try {
   if (typeof window !== 'undefined' && window.localStorage) {
-    const PURGE_KEY = 'phuho_lms_clean_mock_v4';
+    const PURGE_KEY = 'phuho_lms_clean_mock_v6';
     if (!localStorage.getItem(PURGE_KEY)) {
       LMSStorageService.purgeAllMockData();
       localStorage.setItem(PURGE_KEY, 'true');

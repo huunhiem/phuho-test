@@ -2578,69 +2578,111 @@ export class GoogleSheetsService {
           joined.includes('username') ||
           joined.includes('mật khẩu') ||
           joined.includes('vai trò') ||
-          joined.includes('họ và tên')
+          joined.includes('họ và tên') ||
+          joined.includes('họ tên')
         );
       };
 
       const hasHeader = isHeaderRow(accData[0]);
+      const headerRow = hasHeader ? accData[0] : [];
       const rows = hasHeader ? accData.slice(1) : accData;
       if (rows.length === 0) return { success: true, count: 0 };
+
+      // Ánh xạ cột động theo tiêu đề thực tế từ Google Sheet
+      let colId = 0;
+      let colUsername = 1;
+      let colPassword = 2;
+      let colFullName = 3;
+      let colEmail = 4;
+      let colRole = 5;
+      let colCode = 6;
+      let colGrade = 7;
+      let colClass = 8;
+      let colPhone = 9;
+      let colStatus = 10;
+      let colCreatedAt = 11;
+      let colAvatar = 12;
+
+      if (hasHeader) {
+        headerRow.forEach((val: any, idx: number) => {
+          const col = String(val || '').toLowerCase().trim();
+          if (col === 'id') colId = idx;
+          else if (col.includes('đăng nhập') || col.includes('username') || col.includes('tài khoản')) colUsername = idx;
+          else if (col.includes('mật khẩu') || col.includes('password')) colPassword = idx;
+          else if (col.includes('họ') || col.includes('tên') || col.includes('fullname')) colFullName = idx;
+          else if (col.includes('email') || col.includes('thư')) colEmail = idx;
+          else if (col.includes('vai trò') || col.includes('role')) colRole = idx;
+          else if (col.includes('mã') || col.includes('code')) colCode = idx;
+          else if (col.includes('khối') || col.includes('grade')) colGrade = idx;
+          else if (col.includes('lớp') || col.includes('class')) colClass = idx;
+          else if (col.includes('điện thoại') || col.includes('phone') || col.includes('sđt')) colPhone = idx;
+          else if (col.includes('trạng thái') || col.includes('status')) colStatus = idx;
+          else if (col.includes('ngày') || col.includes('created')) colCreatedAt = idx;
+          else if (col.includes('ảnh') || col.includes('avatar')) colAvatar = idx;
+        });
+      }
 
       const classes = LMSStorageService.getClasses();
       const importedUsers: User[] = [];
 
       for (const row of rows) {
         if (!row || (!row[0] && !row[1])) continue;
-        const id = String(row[0] || `user-gsheet-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`);
-        const username = String(row[1] || row[0]).trim();
+        const id = String(row[colId] || `user-gsheet-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`).trim();
+        const username = String(row[colUsername] || row[0]).trim();
         if (username.toLowerCase() === 'tên đăng nhập' || !username) continue;
 
-        const password = String(row[2] || '123456').trim();
-        const fullName = String(row[3] || username).trim();
-        const email = String(row[4] || `${username}@thcs-phuho.edu.vn`).trim();
-        const rawRole = String(row[5] || 'STUDENT').trim().toUpperCase();
+        const password = String(row[colPassword] || '123456').trim();
+        const fullName = String(row[colFullName] || username).trim();
+        const email = String(row[colEmail] || `${username}@thcs-phuho.edu.vn`).trim();
+        const rawRole = String(row[colRole] || 'STUDENT').trim().toUpperCase();
         const role: UserRole = (['ADMIN', 'PRINCIPAL', 'DEPARTMENT_HEAD', 'TEACHER', 'STUDENT'].includes(rawRole)
           ? rawRole
           : 'STUDENT') as UserRole;
-        const code = String(row[6] || '').trim();
-        const gradeStr = String(row[7] || '').trim();
-        let classStr = String(row[8] || '').trim();
+        const code = String(row[colCode] || '').trim();
+        const gradeStr = String(row[colGrade] || '').trim();
+        let classStr = String(row[colClass] || '').trim();
         if (classStr.includes('T') && classStr.includes('-')) {
           const d = new Date(classStr);
           if (!isNaN(d.getTime())) {
             classStr = `${d.getMonth() + 1}/${d.getDate()}`;
           }
         }
-        const phone = String(row[9] || '').trim();
-        const status = String(row[10] || 'ACTIVE').trim().toUpperCase() === 'LOCKED' ? 'LOCKED' : 'ACTIVE';
-        const createdAt = String(row[11] || new Date().toISOString().split('T')[0]);
-        const avatarUrl = row[12] ? String(row[12]).trim() : undefined;
+        const phone = String(row[colPhone] || '').trim();
+        const status = String(row[colStatus] || 'ACTIVE').trim().toUpperCase() === 'LOCKED' ? 'LOCKED' : 'ACTIVE';
+        const createdAt = String(row[colCreatedAt] || new Date().toISOString().split('T')[0]);
+        const avatarUrl = row[colAvatar] ? String(row[colAvatar]).trim() : undefined;
 
         let matchedClass = classes.find((c) => c.name === classStr || c.id === classStr);
-        if (!matchedClass && (classStr === '8/7' || classStr === '8.7' || classStr === '8-7')) {
+        if (!matchedClass && (classStr === '8/7' || classStr === '8.7' || classStr === '8-7' || classStr === '8A7' || code.includes('87') || username.includes('87'))) {
           matchedClass = classes.find((c) => c.id === 'cls-8-7');
         }
-        if (!matchedClass && (classStr === '8/8' || classStr === '8.8' || classStr === '8-8')) {
+        if (!matchedClass && (classStr === '8/8' || classStr === '8.8' || classStr === '8-8' || classStr === '8A8' || code.includes('88') || username.includes('88'))) {
           matchedClass = classes.find((c) => c.id === 'cls-8-8');
+        }
+        if (!matchedClass && (classStr === '7/8' || classStr === '7.8' || classStr === '7-8' || classStr === '7A8' || code.includes('78') || username.includes('78'))) {
+          matchedClass = classes.find((c) => c.id === 'cls-7-8') || classes.find((c) => c.name === '7/8');
+        }
+        if (!matchedClass && classStr) {
+          matchedClass = classes.find((c) => c.name.toLowerCase() === classStr.toLowerCase());
         }
 
         importedUsers.push({
           id,
           username,
-          password,
+          password: password || (role === 'STUDENT' ? '123456' : 'phuho@2025'),
           fullName,
           email,
           role,
           studentCode: role === 'STUDENT' ? code : undefined,
           teacherCode: role !== 'STUDENT' ? code : undefined,
-          classId: matchedClass?.id,
+          classId: matchedClass?.id || (classStr ? `cls-${classStr.replace('/', '-')}` : undefined),
           gradeId:
             matchedClass?.gradeId ||
             (gradeStr.includes('8') || classStr.startsWith('8')
               ? 'grade-8'
-              : gradeStr.includes('7')
+              : gradeStr.includes('7') || classStr.startsWith('7')
               ? 'grade-7'
-              : gradeStr.includes('9')
+              : gradeStr.includes('9') || classStr.startsWith('9')
               ? 'grade-9'
               : 'grade-6'),
           phone,
@@ -2678,39 +2720,106 @@ export class GoogleSheetsService {
       const isHeader = (r: any[]) => {
         if (!Array.isArray(r) || r.length === 0) return false;
         const joined = r.map((c) => String(c || '').toLowerCase()).join(' ');
-        return joined.includes('họ tên') || joined.includes('mã số') || joined.includes('học sinh') || joined.includes('lớp') || joined.includes('stt');
+        return (
+          joined.includes('họ') ||
+          joined.includes('mã') ||
+          joined.includes('học sinh') ||
+          joined.includes('lớp') ||
+          joined.includes('stt') ||
+          joined.includes('tên đăng nhập') ||
+          joined.includes('username')
+        );
       };
 
-      const rows = isHeader(stuData[0]) ? stuData.slice(1) : stuData;
+      const hasHeader = isHeader(stuData[0]);
+      const headerRow = hasHeader ? stuData[0] : [];
+      const rows = hasHeader ? stuData.slice(1) : stuData;
+      if (rows.length === 0) return { success: true, count: 0 };
+
+      // Ánh xạ cột động theo tiêu đề thực tế: 
+      // Sheet HocSinh: 0: ID, 1: Họ tên, 2: Mã HS, 3: Tên đăng nhập, 4: Mật khẩu, 5: Lớp, 6: Khối, 7: Email, 8: SĐT, 9: Trạng thái
+      let colId = 0;
+      let colFullName = 1;
+      let colCode = 2;
+      let colUsername = 3;
+      let colPassword = 4;
+      let colClass = 5;
+      let colGrade = 6;
+      let colEmail = 7;
+      let colPhone = 8;
+      let colStatus = 9;
+
+      if (hasHeader) {
+        headerRow.forEach((val: any, idx: number) => {
+          const c = String(val || '').toLowerCase().trim();
+          if (c === 'id') colId = idx;
+          else if (c.includes('họ') || c.includes('tên hs') || c.includes('họ và tên') || c.includes('fullname')) colFullName = idx;
+          else if (c.includes('mã') || c.includes('student code') || c.includes('mã hs') || c.includes('mã số')) colCode = idx;
+          else if (c.includes('đăng nhập') || c.includes('username') || c.includes('tài khoản')) colUsername = idx;
+          else if (c.includes('mật khẩu') || c.includes('password')) colPassword = idx;
+          else if (c.includes('lớp') || c.includes('class')) colClass = idx;
+          else if (c.includes('khối') || c.includes('grade')) colGrade = idx;
+          else if (c.includes('email') || c.includes('thư')) colEmail = idx;
+          else if (c.includes('điện thoại') || c.includes('phone') || c.includes('sđt')) colPhone = idx;
+          else if (c.includes('trạng thái') || c.includes('status')) colStatus = idx;
+        });
+      }
+
       const classes = LMSStorageService.getClasses();
       const importedStudents: User[] = [];
 
       for (const row of rows) {
-        if (!row || (!row[0] && !row[1])) continue;
-        const fullName = String(row[1] || row[0] || '').trim();
+        if (!row || row.length < 2) continue;
+        const id = String(row[colId] || `user-student-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`).trim();
+        const fullName = String(row[colFullName] || '').trim();
         if (!fullName || fullName === '""' || fullName === 'Họ và tên' || fullName.length < 2) continue;
-        const studentCode = String(row[2] || row[1] || '').trim();
-        const className = String(row[3] || row[2] || '').trim();
-        const username = String(row[4] || (studentCode ? `hs.${studentCode.toLowerCase()}` : `hs.${Date.now()}`)).trim().toLowerCase();
-        const password = String(row[5] || '123456').trim();
-        const email = String(row[6] || `${username}@thcs-phuho.edu.vn`).trim();
+
+        const studentCode = String(row[colCode] || '').trim();
+        let username = String(row[colUsername] || '').trim().toLowerCase();
+        if (!username || username === 'tên đăng nhập') {
+          username = studentCode ? `hs.${studentCode.toLowerCase().replace(/[^a-z0-9]/g, '')}` : `hs.${id}`;
+        }
+
+        const password = String(row[colPassword] || '123456').trim();
+        let className = String(row[colClass] || '').trim();
+        if (className.includes('T') && className.includes('-')) {
+          const d = new Date(className);
+          if (!isNaN(d.getTime())) {
+            className = `${d.getMonth() + 1}/${d.getDate()}`;
+          }
+        }
 
         let matchedClass = classes.find((c) => c.name === className || c.id === className);
-        if (!matchedClass && (className.includes('8/7') || className.includes('8-7'))) matchedClass = classes.find((c) => c.id === 'cls-8-7');
-        if (!matchedClass && (className.includes('8/8') || className.includes('8-8'))) matchedClass = classes.find((c) => c.id === 'cls-8-8');
+        if (!matchedClass && (className.includes('8/7') || className.includes('8-7') || className.includes('8.7') || className.includes('8a7') || studentCode.includes('87') || username.includes('87'))) {
+          matchedClass = classes.find((c) => c.id === 'cls-8-7');
+        }
+        if (!matchedClass && (className.includes('8/8') || className.includes('8-8') || className.includes('8.8') || className.includes('8a8') || studentCode.includes('88') || username.includes('88'))) {
+          matchedClass = classes.find((c) => c.id === 'cls-8-8');
+        }
+        if (!matchedClass && (className.includes('7/8') || className.includes('7-8') || className.includes('7.8') || className.includes('7a8') || studentCode.includes('78') || username.includes('78'))) {
+          matchedClass = classes.find((c) => c.id === 'cls-7-8') || classes.find((c) => c.name === '7/8');
+        }
+        if (!matchedClass && className) {
+          matchedClass = classes.find((c) => c.name.toLowerCase() === className.toLowerCase());
+        }
+
+        const email = String(row[colEmail] || `${username}@thcs-phuho.edu.vn`).trim();
+        const phone = String(row[colPhone] || '').trim();
+        const status = String(row[colStatus] || 'ACTIVE').trim().toUpperCase() === 'LOCKED' ? 'LOCKED' : 'ACTIVE';
 
         importedStudents.push({
-          id: String(row[0] && String(row[0]).startsWith('user-') ? row[0] : `user-student-${studentCode || Date.now()}-${Math.random().toString(36).substring(2, 5)}`),
+          id,
           username,
-          password,
+          password: password || '123456',
           fullName,
           email,
           role: 'STUDENT',
           studentCode,
-          classId: matchedClass?.id,
+          classId: matchedClass?.id || (className ? `cls-${className.replace('/', '-')}` : undefined),
           gradeId: matchedClass?.gradeId || (className.startsWith('8') ? 'grade-8' : className.startsWith('7') ? 'grade-7' : className.startsWith('9') ? 'grade-9' : 'grade-6'),
-          status: 'ACTIVE',
+          status,
           schoolId: 'school-phuho-01',
+          phone,
           createdAt: new Date().toISOString().split('T')[0]
         });
       }
