@@ -32,6 +32,7 @@ export interface User {
   phone?: string;
   schoolId: string;
   classId?: string;     // Dành cho học sinh
+  className?: string;   // Tên lớp học sinh (e.g. 8/7, 8/8)
   gradeId?: string;     // Khối
   assignedClassIds?: string[]; // Dành cho giáo viên
   teacherCode?: string; // Mã giáo viên

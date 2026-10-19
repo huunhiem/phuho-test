@@ -80,6 +80,32 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
   const [syncAssignMessage, setSyncAssignMessage] = useState<string | null>(null);
   const [validationError, setValidationError] = useState<string>('');
 
+  // Tự động mở modal giao bài khi chuyển từ "Tạo đề" sang
+  useEffect(() => {
+    try {
+      const pendingTestId = sessionStorage.getItem('phuho_pending_assign_test_id');
+      if (pendingTestId) {
+        sessionStorage.removeItem('phuho_pending_assign_test_id');
+        const found = allTests.find((t) => t.id === pendingTestId);
+        if (found) {
+          const defaultClass = assignableClasses[0] || allClasses[0];
+          setEditingAssign(null);
+          setValidationError('');
+          setFormData({
+            testId: found.id,
+            selectedClassIds: defaultClass ? [defaultClass.id] : [],
+            startTime: new Date().toISOString().slice(0, 16),
+            endTime: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 16),
+            password: '',
+            allowReviewAfterSubmit: true,
+            shuffleQuestions: true
+          });
+          setIsModalOpen(true);
+        }
+      }
+    } catch {}
+  }, [allTests, assignableClasses, allClasses]);
+
   // Chuẩn hóa chuỗi tên lớp học (ví dụ: '8-7', '8/7', '8a7', 'cls-8-7' -> '8-7')
   const normalizeClassKey = (str: string): string => {
     if (!str) return '';
@@ -93,25 +119,21 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
     // 1. Phân quyền và phạm vi hiển thị
     if (!isAdmin) {
       if (assignScopeFilter === 'MINE') {
-        const mineList = list.filter((a) => LMSStorageService.isAssignmentCreatedByUser(a, currentUser));
-        list = mineList.length > 0 ? mineList : list;
+        list = list.filter((a) => LMSStorageService.isAssignmentCreatedByUser(a, currentUser));
       } else if (assignScopeFilter === 'TEACHING') {
-        const myClassNames = new Set(classes.map((c) => c.name));
+        const myClassNames = new Set(classes.map((c) => c.name.toLowerCase()));
         const myClassIds = new Set(classes.map((c) => c.id));
         const myClassKeys = new Set(classes.map((c) => normalizeClassKey(c.name)));
 
-        const teachingList = list.filter((a) => {
+        list = list.filter((a) => {
           if (LMSStorageService.isAssignmentCreatedByUser(a, currentUser)) return true;
-          if (a.classIds.some((cid) => myClassIds.has(cid))) return true;
-          if (a.classNames.some((cname) => myClassNames.has(cname))) return true;
-          if (a.classNames.some((cname) => myClassKeys.has(normalizeClassKey(cname)))) return true;
+          if (a.classIds?.some((cid) => myClassIds.has(cid))) return true;
+          if (a.classNames?.some((cname) => myClassNames.has(cname.toLowerCase()))) return true;
+          if (a.classNames?.some((cname) => myClassKeys.has(normalizeClassKey(cname)))) return true;
           return false;
         });
-
-        // Nếu lọc theo lớp phụ trách có kết quả thì dùng, nếu chưa (hoặc chưa phân công cụ thể) thì hiển thị toàn bộ bài tập để giáo viên không bị trống rỗng
-        list = teachingList.length > 0 ? teachingList : list;
       }
-      // 'ALL': giáo viên vẫn có thể bấm xem toàn trường khi cần tham khảo đề thi của khối
+      // 'ALL': giáo viên có thể bấm xem toàn trường khi cần tham khảo
     } else {
       if (assignScopeFilter === 'MINE') {
         list = list.filter((a) => LMSStorageService.isAssignmentCreatedByUser(a, currentUser));
@@ -309,16 +331,20 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
   };
 
   const handleOpenAdd = () => {
-    if (!isAdmin && assignableTests.length === 0) {
-      setToastMessage('⚠️ Thầy/Cô chưa có đề kiểm tra nào do mình tạo. Vui lòng vào mục "Tạo đề kiểm tra" để tạo đề trước khi giao bài!');
-      setTimeout(() => setToastMessage(null), 5000);
+    if (allTests.length === 0) {
+      setToastMessage('⚠️ Hệ thống chưa có đề kiểm tra nào. Đang chuyển sang "Tạo đề kiểm tra" từ Ngân hàng Google Sheet...');
+      setTimeout(() => {
+        if (onNavigate) onNavigate('test_builder');
+      }, 1200);
       return;
     }
     setEditingAssign(null);
     setValidationError('');
+    const defaultTest = assignableTests[0] || allTests[0];
+    const defaultClass = assignableClasses[0] || allClasses[0];
     setFormData({
-      testId: assignableTests[0]?.id || '',
-      selectedClassIds: assignableClasses[0]?.id ? [assignableClasses[0].id] : ['cls-6-1'],
+      testId: defaultTest ? defaultTest.id : '',
+      selectedClassIds: defaultClass ? [defaultClass.id] : [],
       startTime: new Date().toISOString().slice(0, 16),
       endTime: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 16),
       password: '',
@@ -424,8 +450,11 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
       }
     }).catch(() => {});
     refreshAssignments();
+    setSelectedGradeFilter('ALL');
+    setSelectedClassFilter('ALL');
+    setSearchAssignQuery('');
     setIsModalOpen(false);
-    setToastMessage('✓ Đã giao bài kiểm tra thành công!');
+    setToastMessage('✓ Đã giao bài kiểm tra thành công! Học sinh các lớp được chọn có thể vào phòng thi làm bài ngay.');
     setTimeout(() => setToastMessage(null), 4000);
   };
 

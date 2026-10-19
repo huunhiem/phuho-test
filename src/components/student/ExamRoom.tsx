@@ -278,8 +278,21 @@ export const ExamRoom: React.FC<ExamRoomProps> = ({
       studentId: currentUser.id,
       studentName: currentUser.fullName,
       studentCode: currentUser.studentCode || 'PH25-STUDENT',
-      classId: currentUser.classId || 'cls-6-1',
-      className: '6/1',
+      classId: currentUser.classId || assignment.classIds[0] || 'cls-8-7',
+      className: (() => {
+        if (currentUser.className && currentUser.className.trim()) return currentUser.className.trim();
+        const found = LMSStorageService.getClasses().find((c) => c.id === currentUser.classId);
+        if (found) return found.name;
+        const code = (currentUser.studentCode || currentUser.username || '').toLowerCase();
+        if (code.includes('87') || code.includes('8.7') || code.includes('8-7')) return '8/7';
+        if (code.includes('88') || code.includes('8.8') || code.includes('8-8')) return '8/8';
+        if (code.includes('78') || code.includes('7.8') || code.includes('7-8')) return '7/8';
+        if (code.includes('77') || code.includes('7.7') || code.includes('7-7')) return '7/7';
+        if (code.includes('67') || code.includes('6.7') || code.includes('6-7')) return '6/7';
+        if (code.includes('68') || code.includes('6.8') || code.includes('6-8')) return '6/8';
+        if (code.includes('69') || code.includes('6.9') || code.includes('6-9')) return '6/9';
+        return (assignment.classNames && assignment.classNames[0]) || ('Khối ' + test.gradeLevel);
+      })(),
       gradeLevel: test.gradeLevel,
       answers: evaluatedAnswers,
       score: totalScore,

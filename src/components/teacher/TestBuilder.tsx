@@ -33,7 +33,8 @@ import {
   Edit2,
   DownloadCloud,
   UploadCloud,
-  Loader2
+  Loader2,
+  Send
 } from 'lucide-react';
 import {
   Test,
@@ -973,8 +974,9 @@ export const TestBuilder: React.FC<TestBuilderProps> = ({ currentUser, onTestCre
     }).catch(() => {});
     refreshTests();
     setIsCreating(false);
-    setToastMessage('✓ Đã tạo đề thi mới thành công!');
-    setTimeout(() => setToastMessage(null), 4000);
+    try {
+      sessionStorage.setItem('phuho_pending_assign_test_id', newTest.id);
+    } catch {}
     if (onTestCreated) onTestCreated(newTest);
   };
 
@@ -2139,18 +2141,34 @@ export const TestBuilder: React.FC<TestBuilderProps> = ({ currentUser, onTestCre
                             </span>
                           )}
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setViewingTestResults(test);
-                            setTestResultTab('ALL');
-                            setTestResultSearch('');
-                          }}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 transition-colors cursor-pointer shadow-2xs"
-                        >
-                          <Award className="w-3.5 h-3.5 text-indigo-600" />
-                          <span>Xem kết quả thi</span>
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              try {
+                                sessionStorage.setItem('phuho_pending_assign_test_id', test.id);
+                              } catch {}
+                              if (onTestCreated) onTestCreated(test);
+                            }}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 shadow-2xs transition-colors cursor-pointer"
+                            title="Giao đề kiểm tra này cho học sinh ngay"
+                          >
+                            <Send className="w-3.5 h-3.5" />
+                            <span>Giao đề này</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setViewingTestResults(test);
+                              setTestResultTab('ALL');
+                              setTestResultSearch('');
+                            }}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 transition-colors cursor-pointer shadow-2xs"
+                          >
+                            <Award className="w-3.5 h-3.5 text-indigo-600" />
+                            <span>Xem kết quả thi</span>
+                          </button>
+                        </div>
                       </div>
                     );
                   })()}

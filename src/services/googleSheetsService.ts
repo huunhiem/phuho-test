@@ -2971,34 +2971,27 @@ export class GoogleSheetsService {
     let submissionsCount = 0;
 
     try {
-      // 1. Tải danh sách Tài khoản và Học sinh trước
+      // 1. Tải Lớp học, Câu hỏi, Bài học, Đề thi, Giao đề, Bảng điểm song song
+      const [clsRes, qRes, lRes, tRes, aRes, subRes] = await Promise.all([
+        this.pullClassesFromAppsScript(),
+        this.pullQuestionsFromAppsScript(),
+        this.pullLessonsFromAppsScript(),
+        this.pullTestsFromAppsScript(),
+        this.pullAssignmentsFromAppsScript(),
+        this.pullSubmissionsFromAppsScript()
+      ]);
+
+      classesCount = clsRes.count;
+      questionsCount = qRes.count;
+      lessonsCount = lRes.count;
+      testsCount = tRes.count;
+      assignmentsCount = aRes.count;
+      submissionsCount = subRes.count;
+
+      // 2. Tải Tài khoản và Học sinh
       const accRes = await this.pullAccountsFromAppsScript();
       const stuRes = await this.pullStudentsFromAppsScript();
       usersCount = accRes.count + stuRes.count;
-
-      // 2. Tải danh sách Lớp học và Phân công giảng dạy
-      const clsRes = await this.pullClassesFromAppsScript();
-      classesCount = clsRes.count;
-
-      // 3. Tải Ngân hàng Câu hỏi
-      const qRes = await this.pullQuestionsFromAppsScript();
-      questionsCount = qRes.count;
-
-      // 4. Tải Tên bài học
-      const lRes = await this.pullLessonsFromAppsScript();
-      lessonsCount = lRes.count;
-
-      // 5. Tải Đề thi
-      const tRes = await this.pullTestsFromAppsScript();
-      testsCount = tRes.count;
-
-      // 6. Tải Đợt giao đề
-      const aRes = await this.pullAssignmentsFromAppsScript();
-      assignmentsCount = aRes.count;
-
-      // 7. Tải Bảng điểm bài làm
-      const subRes = await this.pullSubmissionsFromAppsScript();
-      submissionsCount = subRes.count;
 
       // Đảm bảo quét và liên kết hai chiều mọi phân công lớp học cho giáo viên
       LMSStorageService.refreshTeacherAssignmentsFromClasses();

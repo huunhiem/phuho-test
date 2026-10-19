@@ -1257,20 +1257,8 @@ export class LMSStorageService {
 
   // Tests
   static getTests(): Test[] {
-    const list = getStored<Test[]>(STORAGE_KEYS.TESTS, INITIAL_TESTS);
-    const existingIds = new Set(list.map((t) => t.id));
-    let hasMissing = false;
-    const merged = [...list];
-    INITIAL_TESTS.forEach((initT) => {
-      if (!existingIds.has(initT.id)) {
-        merged.push(initT);
-        hasMissing = true;
-      }
-    });
-    if (hasMissing) {
-      setStored(STORAGE_KEYS.TESTS, merged);
-    }
-    return merged.map((test) => {
+    const list = getStored<Test[]>(STORAGE_KEYS.TESTS, []);
+    return list.map((test) => {
       if (test.matrix?.selectedTopics && test.matrix.selectedTopics.some((t) => t.includes('Chủ đề A') || t.includes('Chủ đề B') || t.includes('Chủ đề C') || t.includes('Chủ đề D') || t.includes('Chủ đề E') || t.includes('Chủ đề F'))) {
         const normalized = test.matrix.selectedTopics.map((top) => normalizeKNTTTopic(top, test.gradeLevel));
         return {
@@ -1377,20 +1365,7 @@ export class LMSStorageService {
 
   // Assignments
   static getAssignments(): Assignment[] {
-    const list = getStored<Assignment[]>(STORAGE_KEYS.ASSIGNMENTS, INITIAL_ASSIGNMENTS);
-    const existingIds = new Set(list.map((a) => a.id));
-    let hasMissing = false;
-    const merged = [...list];
-    INITIAL_ASSIGNMENTS.forEach((initA) => {
-      if (!existingIds.has(initA.id)) {
-        merged.push(initA);
-        hasMissing = true;
-      }
-    });
-    if (hasMissing) {
-      setStored(STORAGE_KEYS.ASSIGNMENTS, merged);
-    }
-    return merged;
+    return getStored<Assignment[]>(STORAGE_KEYS.ASSIGNMENTS, []);
   }
 
   static addAssignment(a: Assignment): void {
@@ -1768,10 +1743,10 @@ export class LMSStorageService {
         'q-11', 'q-12', 'q-13', 'q-14', 'q-15', 'q-16', 'q-17', 'q-18', 'q-19', 'q-20'
       ]);
       const mockTestIds = new Set([
-        'test-mock-01', 'test-mock-02', 'test-sample-01'
+        'test-mock-01', 'test-mock-02', 'test-sample-01', 'test-th8-gk1', 'test-th6-gk1'
       ]);
       const mockAssignmentIds = new Set([
-        'assign-mock-01', 'assign-mock-02', 'assign-sample-01'
+        'assign-mock-01', 'assign-mock-02', 'assign-sample-01', 'assign-th8-87', 'assign-th6-67'
       ]);
       const mockSubmissionIds = new Set([
         'sub-8701', 'sub-8702', 'sub-01', 'sub-02', 'sub-03', 'sub-04'
