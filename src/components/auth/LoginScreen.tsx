@@ -73,8 +73,10 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
             uName === trimmedUser ||
             uEmail === trimmedUser ||
             (uStudentCode && uStudentCode === trimmedUser) ||
+            (uStudentCode && uStudentCode.replace(/[^a-z0-9]/g, '') === trimmedUser.replace(/[^a-z0-9]/g, '')) ||
             (uTeacherCode && uTeacherCode === trimmedUser) ||
             (uName.startsWith('hs.') && uName.replace('hs.', '') === trimmedUser) ||
+            ('hs.' + trimmedUser === uName) ||
             uFullName === trimmedUser;
 
           if (!matchIdentity) return false;
@@ -99,14 +101,15 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
 
       let matched = findMatch(allUsers);
 
-      // Nếu chưa tìm thấy trên máy cục bộ, thử đồng bộ ngầm với Google Sheet
+      // Nếu chưa tìm thấy trên máy cục bộ, thử tải nhanh Tài khoản & Học sinh từ Google Sheet (chỉ 1s)
       if (!matched) {
         try {
-          const syncRes = await GoogleSheetsService.syncFromAppsScript();
-          if (syncRes.success) {
-            allUsers = LMSStorageService.getUsers();
-            matched = findMatch(allUsers);
-          }
+          await Promise.allSettled([
+            GoogleSheetsService.pullAccountsFromAppsScript(),
+            GoogleSheetsService.pullStudentsFromAppsScript()
+          ]);
+          allUsers = LMSStorageService.getUsers();
+          matched = findMatch(allUsers);
         } catch {
           // Bỏ qua lỗi
         }
@@ -137,7 +140,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
 
         onLoginSuccess(matched);
       } else {
-        setError('Tên đăng nhập hoặc Mật khẩu không chính xác! Vui lòng kiểm tra lại.');
+        setError('Tên đăng nhập hoặc Mật khẩu không chính xác! (Mẹo cho Học sinh: Mật khẩu mặc định là 123456, có thể đăng nhập bằng Tên tài khoản ví dụ hs.hoaian87 hoặc Mã học sinh ví dụ HS87-01).');
       }
     } finally {
       setIsLoggingIn(false);

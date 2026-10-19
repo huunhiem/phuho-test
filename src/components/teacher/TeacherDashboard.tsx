@@ -48,19 +48,28 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ currentUser,
   const uFull = (currentUser.fullName || '').toLowerCase().trim();
   const uUser = (currentUser.username || '').toLowerCase().trim();
 
-  const visibleTests = isPrivileged
+  const myClassIds = new Set(visibleClasses.map((c) => c.id));
+  const myClassNames = new Set(visibleClasses.map((c) => c.name.toLowerCase()));
+
+  const matchedTests = isPrivileged
     ? tests
     : tests.filter((t) => {
         if (t.createdBy === currentUser.id) return true;
         return LMSStorageService.isTeacherNameMatch(t.authorName, currentUser);
       });
+  const visibleTests = matchedTests.length > 0 ? matchedTests : tests;
 
-  const visibleAssignments = isPrivileged
+  const matchedAssignments = isPrivileged
     ? assignments
     : assignments.filter((a) => {
         if (a.assignedBy === currentUser.id) return true;
-        return LMSStorageService.isTeacherNameMatch(a.assignedByName, currentUser);
+        if (LMSStorageService.isAssignmentCreatedByUser(a, currentUser)) return true;
+        if (LMSStorageService.isTeacherNameMatch(a.assignedByName, currentUser)) return true;
+        if (a.classIds?.some((cid) => myClassIds.has(cid))) return true;
+        if (a.classNames?.some((cn) => myClassNames.has(cn.toLowerCase()))) return true;
+        return false;
       });
+  const visibleAssignments = matchedAssignments.length > 0 ? matchedAssignments : assignments;
 
   const visibleAssignmentIds = new Set(visibleAssignments.map((a) => a.id));
 

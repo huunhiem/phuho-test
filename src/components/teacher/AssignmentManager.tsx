@@ -58,10 +58,11 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
   const questions = LMSStorageService.getQuestions();
 
   const allTests = LMSStorageService.getTests();
-  // Riêng Tài khoản quản trị hiển thị tất cả đề; Giáo viên chỉ thấy và giao đề do chính tài khoản mình tạo
+  // Riêng Tài khoản quản trị hiển thị tất cả đề; Giáo viên ưu tiên đề do mình tạo hoặc dùng chung đề trong tổ
   const assignableTests = useMemo(() => {
     if (isAdmin) return allTests;
-    return allTests.filter((t) => LMSStorageService.isTestCreatedByUser(t, currentUser));
+    const myTests = allTests.filter((t) => LMSStorageService.isTestCreatedByUser(t, currentUser));
+    return myTests.length > 0 ? myTests : allTests;
   }, [allTests, isAdmin, currentUser]);
 
   const [assignments, setAssignments] = useState<Assignment[]>(() => LMSStorageService.getAssignments());
@@ -92,19 +93,23 @@ export const AssignmentManager: React.FC<AssignmentManagerProps> = ({ currentUse
     // 1. Phân quyền và phạm vi hiển thị
     if (!isAdmin) {
       if (assignScopeFilter === 'MINE') {
-        list = list.filter((a) => LMSStorageService.isAssignmentCreatedByUser(a, currentUser));
+        const mineList = list.filter((a) => LMSStorageService.isAssignmentCreatedByUser(a, currentUser));
+        list = mineList.length > 0 ? mineList : list;
       } else if (assignScopeFilter === 'TEACHING') {
         const myClassNames = new Set(classes.map((c) => c.name));
         const myClassIds = new Set(classes.map((c) => c.id));
         const myClassKeys = new Set(classes.map((c) => normalizeClassKey(c.name)));
 
-        list = list.filter((a) => {
+        const teachingList = list.filter((a) => {
           if (LMSStorageService.isAssignmentCreatedByUser(a, currentUser)) return true;
           if (a.classIds.some((cid) => myClassIds.has(cid))) return true;
           if (a.classNames.some((cname) => myClassNames.has(cname))) return true;
           if (a.classNames.some((cname) => myClassKeys.has(normalizeClassKey(cname)))) return true;
           return false;
         });
+
+        // Nếu lọc theo lớp phụ trách có kết quả thì dùng, nếu chưa (hoặc chưa phân công cụ thể) thì hiển thị toàn bộ bài tập để giáo viên không bị trống rỗng
+        list = teachingList.length > 0 ? teachingList : list;
       }
       // 'ALL': giáo viên vẫn có thể bấm xem toàn trường khi cần tham khảo đề thi của khối
     } else {

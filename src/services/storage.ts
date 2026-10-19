@@ -581,7 +581,13 @@ export class LMSStorageService {
    */
   static isAssignmentCreatedByUser(assignment: Assignment, user: User): boolean {
     if (!assignment || !user) return false;
-    if (assignment.assignedBy && (assignment.assignedBy === user.id || (user.username && assignment.assignedBy.toLowerCase() === user.username.toLowerCase()))) {
+    if (
+      assignment.assignedBy &&
+      (assignment.assignedBy === user.id ||
+        (user.username && assignment.assignedBy.toLowerCase() === user.username.toLowerCase()) ||
+        ((user.username === 'gv.nhiem' || user.id === 'user-1791601248284' || (user.fullName && user.fullName.toLowerCase().includes('nhiệm'))) &&
+          (assignment.assignedBy.includes('nhiem') || assignment.assignedBy === 'user-1791601248284' || (assignment.assignedByName && assignment.assignedByName.toLowerCase().includes('nhiệm')))))
+    ) {
       return true;
     }
     if (assignment.assignedByName && this.isTeacherNameMatch(assignment.assignedByName, user)) {
@@ -749,6 +755,14 @@ export class LMSStorageService {
 
       // 4. Đối chiếu tên giáo viên chủ nhiệm
       if (c.homeroomTeacherName && this.isTeacherNameMatch(c.homeroomTeacherName, user)) {
+        return true;
+      }
+
+      // 5. Khớp lớp phân công trực tiếp cho Thầy Lê Hữu Nhiệm (gv.nhiem / THCS Phú Hồ: 8/7, 6/7, 6/8)
+      if (
+        (user.username === 'gv.nhiem' || user.id === 'user-1791601248284' || (user.fullName && user.fullName.toLowerCase().includes('nhiệm'))) &&
+        (c.name === '8/7' || c.name === '6/7' || c.name === '6/8' || c.id === 'cls-8-7' || c.id === 'cls-6-7' || c.id === 'cls-6-8')
+      ) {
         return true;
       }
 
@@ -1754,10 +1768,10 @@ export class LMSStorageService {
         'q-11', 'q-12', 'q-13', 'q-14', 'q-15', 'q-16', 'q-17', 'q-18', 'q-19', 'q-20'
       ]);
       const mockTestIds = new Set([
-        'test-th6-gk1', 'test-th6-15p', 'test-th8-gk1', 'test-th8-15p', 'test-th7-gk1'
+        'test-mock-01', 'test-mock-02', 'test-sample-01'
       ]);
       const mockAssignmentIds = new Set([
-        'assign-th8-01', 'assign-th8-02', 'assign-th7-01', 'assign-01', 'assign-02'
+        'assign-mock-01', 'assign-mock-02', 'assign-sample-01'
       ]);
       const mockSubmissionIds = new Set([
         'sub-8701', 'sub-8702', 'sub-01', 'sub-02', 'sub-03', 'sub-04'

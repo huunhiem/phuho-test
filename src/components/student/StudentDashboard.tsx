@@ -44,13 +44,19 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser 
   if (!studentClassName && currentUser.classId) {
     studentClassName = currentUser.classId.replace('cls-', '').replace('-', '/');
   }
-  // Nếu chưa có classId, suy luận từ mã học sinh hoặc username (ví dụ: hs.phuc.8a7 -> 8/7, PH25-080701 -> 8/7)
+  // Nếu chưa có classId, suy luận từ mã học sinh hoặc username (ví dụ: hs.phuc.8a7 -> 8/7, HS87-01 -> 8/7)
   if (!studentClassName) {
     const rawCode = `${currentUser.studentCode || ''} ${currentUser.username || ''}`.toLowerCase();
-    if (rawCode.includes('8a7') || rawCode.includes('8.7') || rawCode.includes('8-7') || rawCode.includes('0807')) {
+    if (rawCode.includes('8a7') || rawCode.includes('8.7') || rawCode.includes('8-7') || rawCode.includes('0807') || rawCode.includes('87')) {
       studentClassName = '8/7';
-    } else if (rawCode.includes('8a8') || rawCode.includes('8.8') || rawCode.includes('8-8') || rawCode.includes('0808')) {
+    } else if (rawCode.includes('8a8') || rawCode.includes('8.8') || rawCode.includes('8-8') || rawCode.includes('0808') || rawCode.includes('88')) {
       studentClassName = '8/8';
+    } else if (rawCode.includes('7a8') || rawCode.includes('7.8') || rawCode.includes('7-8') || rawCode.includes('78')) {
+      studentClassName = '7/8';
+    } else if (rawCode.includes('6a7') || rawCode.includes('6.7') || rawCode.includes('6-7') || rawCode.includes('67')) {
+      studentClassName = '6/7';
+    } else if (rawCode.includes('6a8') || rawCode.includes('6.8') || rawCode.includes('6-8') || rawCode.includes('68')) {
+      studentClassName = '6/8';
     } else if (rawCode.includes('6a1') || rawCode.includes('6.1') || rawCode.includes('6-1') || rawCode.includes('0601')) {
       studentClassName = '6/1';
     } else if (rawCode.includes('6a2') || rawCode.includes('6.2') || rawCode.includes('6-2') || rawCode.includes('0602')) {
@@ -102,6 +108,11 @@ export const StudentDashboard: React.FC<StudentDashboardProps> = ({ currentUser 
       return aKey === studentClassKey;
     });
     if (matchesClassId) return true;
+
+    // 5. Nếu bài tập cùng khối và lớp của học sinh thuộc danh sách khối
+    if (a.gradeLevel === studentGradeNum && (a.classNames.length === 0 || a.classNames.includes(studentClass))) {
+      return true;
+    }
 
     return false;
   });
