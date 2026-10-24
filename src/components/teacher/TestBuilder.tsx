@@ -53,6 +53,7 @@ import { GoogleSheetsService, getSavedSheetId, getGoogleAccessToken, getAppsScri
 import { onStorageChange } from '../../services/storageEvents';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 import { AppsScriptUpdateNoticeModal } from '../common/AppsScriptUpdateNoticeModal';
+import { WordExportModal } from './WordExportModal';
 
 interface TestBuilderProps {
   currentUser: User;
@@ -428,6 +429,7 @@ export const TestBuilder: React.FC<TestBuilderProps> = ({ currentUser, onTestCre
   const [editingTest, setEditingTest] = useState<Test | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [previewTest, setPreviewTest] = useState<Test | null>(null);
+  const [exportWordTest, setExportWordTest] = useState<Test | null>(null);
   const [deleteTestId, setDeleteTestId] = useState<string | null>(null);
   const [validationError, setValidationError] = useState<string>('');
 
@@ -1973,7 +1975,57 @@ export const TestBuilder: React.FC<TestBuilderProps> = ({ currentUser, onTestCre
                 Sinh tự động <strong>{testForm.variantCount} mã đề</strong> (101, 102...) với thứ tự câu hỏi đảo ngẫu nhiên.
               </div>
 
-              <div className="flex items-center gap-3 ml-auto">
+              <div className="flex items-center gap-2.5 ml-auto flex-wrap">
+                {selectedQuestionIds.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const draftVariants = generateVariants(selectedQuestionIds, testForm.variantCount);
+                      const draftTest: Test = {
+                        id: editingTest?.id || `test-${Date.now()}`,
+                        title: testForm.title || 'Đề kiểm tra Tin học',
+                        gradeLevel: Number(testForm.gradeLevel),
+                        durationMinutes: Number(testForm.durationMinutes),
+                        totalQuestions: selectedQuestionIds.length,
+                        totalPoints: Math.round(actualSelectedPoints * 100) / 100 || matrixSummary.totalPoints || 10,
+                        matrix: {
+                          knowCount: matrixSummary.byDifficulty.BIET.count,
+                          understandCount: matrixSummary.byDifficulty.HIEU.count,
+                          applyCount: matrixSummary.byDifficulty.VAN_DUNG.count,
+                          selectedTopics: testForm.selectedTopics,
+                          selectedLessons: lessonSelectionMode === 'CUSTOM' && selectedLessons.length > 0 ? selectedLessons : undefined,
+                          grid: matrixGrid,
+                          difficultyPoints: {
+                            BIET: { count: matrixSummary.byDifficulty.BIET.count, points: matrixSummary.byDifficulty.BIET.points },
+                            HIEU: { count: matrixSummary.byDifficulty.HIEU.count, points: matrixSummary.byDifficulty.HIEU.points },
+                            VAN_DUNG: { count: matrixSummary.byDifficulty.VAN_DUNG.count, points: matrixSummary.byDifficulty.VAN_DUNG.points }
+                          },
+                          typePoints: {
+                            SINGLE_CHOICE: { count: matrixSummary.byType.SINGLE_CHOICE.count, points: matrixSummary.byType.SINGLE_CHOICE.points },
+                            MULTIPLE_CHOICE: { count: matrixSummary.byType.MULTIPLE_CHOICE.count, points: matrixSummary.byType.MULTIPLE_CHOICE.points },
+                            TRUE_FALSE: { count: matrixSummary.byType.TRUE_FALSE.count, points: matrixSummary.byType.TRUE_FALSE.points },
+                            FILL_IN_BLANK: { count: matrixSummary.byType.FILL_IN_BLANK.count, points: matrixSummary.byType.FILL_IN_BLANK.points },
+                            ESSAY: { count: matrixSummary.byType.ESSAY.count, points: matrixSummary.byType.ESSAY.points }
+                          },
+                          questionPointsMap
+                        },
+                        questionIds: selectedQuestionIds,
+                        questionPoints: questionPointsMap,
+                        variants: draftVariants.length > 0 ? draftVariants : [{ code: '101', questionIds: selectedQuestionIds }],
+                        createdBy: currentUser.id,
+                        authorName: currentUser.fullName,
+                        createdAt: editingTest?.createdAt || new Date().toISOString().split('T')[0],
+                        status: 'READY'
+                      };
+                      setExportWordTest(draftTest);
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-xl transition-colors cursor-pointer shadow-2xs"
+                    title="Xuất đề thi đang soạn ra file Word (.docx)"
+                  >
+                    <FileText className="w-4 h-4 text-blue-600" />
+                    <span>Xuất file Word (.docx)</span>
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => {
@@ -2031,6 +2083,14 @@ export const TestBuilder: React.FC<TestBuilderProps> = ({ currentUser, onTestCre
                     </div>
 
                     <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setExportWordTest(test)}
+                        className="p-1.5 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+                        title="Xuất đề thi ra file Word (.docx)"
+                      >
+                        <FileText className="w-4 h-4" />
+                      </button>
                       <button
                         type="button"
                         onClick={() => handleOpenEditTest(test)}
@@ -2142,6 +2202,15 @@ export const TestBuilder: React.FC<TestBuilderProps> = ({ currentUser, onTestCre
                           )}
                         </div>
                         <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setExportWordTest(test)}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 transition-colors cursor-pointer shadow-2xs"
+                            title="Xuất đề thi ra file Microsoft Word (.docx)"
+                          >
+                            <FileText className="w-3.5 h-3.5 text-blue-600" />
+                            <span>Xuất Word</span>
+                          </button>
                           <button
                             type="button"
                             onClick={() => {
@@ -2353,13 +2422,24 @@ export const TestBuilder: React.FC<TestBuilderProps> = ({ currentUser, onTestCre
                   <span className="font-bold text-indigo-700">Thang {previewTest.totalPoints} điểm</span>
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => setPreviewTest(null)}
-                className="text-slate-400 hover:text-slate-700 font-bold p-1 rounded-lg"
-              >
-                ✕
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setExportWordTest(previewTest)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 transition-colors cursor-pointer shadow-2xs"
+                  title="Xuất file Word (.docx)"
+                >
+                  <FileText className="w-3.5 h-3.5 text-blue-600" />
+                  <span>Xuất file Word (.docx)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPreviewTest(null)}
+                  className="text-slate-400 hover:text-slate-700 font-bold p-1 rounded-lg"
+                >
+                  ✕
+                </button>
+              </div>
             </div>
 
             {/* Selected lessons display in preview */}
@@ -2529,11 +2609,20 @@ export const TestBuilder: React.FC<TestBuilderProps> = ({ currentUser, onTestCre
               </div>
             </div>
 
-            <div className="text-right pt-4 border-t border-slate-100">
+            <div className="flex items-center justify-between pt-4 border-t border-slate-100 flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setExportWordTest(previewTest)}
+                className="inline-flex items-center gap-2 px-4 py-2.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-xs transition-colors cursor-pointer"
+              >
+                <FileText className="w-4 h-4" />
+                <span>Xuất file Word (.docx)</span>
+              </button>
+
               <button
                 type="button"
                 onClick={() => setPreviewTest(null)}
-                className="px-5 py-2.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl cursor-pointer"
+                className="px-5 py-2.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl cursor-pointer"
               >
                 Đóng xem trước
               </button>
@@ -2806,6 +2895,14 @@ export const TestBuilder: React.FC<TestBuilderProps> = ({ currentUser, onTestCre
         onClose={() => setShowScriptUpdateModal(false)}
         title="Đồng bộ Đề thi giữa các trình duyệt & thiết bị"
         context="test"
+      />
+
+      {/* Modal Xuất Đề thi ra file Word (.docx) */}
+      <WordExportModal
+        isOpen={Boolean(exportWordTest)}
+        onClose={() => setExportWordTest(null)}
+        test={exportWordTest}
+        allQuestions={questions}
       />
     </div>
   );
